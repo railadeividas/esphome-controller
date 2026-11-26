@@ -65,7 +65,9 @@ fun decodeNativeFrame(frame: ApiFrame): NativeEvent {
         MessageType.PING_REQUEST -> NativeEvent.PingRequested
         MessageType.DEVICE_INFO_RESPONSE -> Api.DeviceInfoResponse.parseFrom(payload).let { p ->
             val project = listOf(p.projectName, p.projectVersion).filter { it.isNotBlank() }.joinToString(" ")
-            NativeEvent.Info(DeviceDetails(p.model, p.manufacturer, p.esphomeVersion, project))
+            // The configured area, falling back to the older suggested_area field.
+            val area = (if (p.hasArea()) p.area.name else "").ifBlank { p.suggestedArea }
+            NativeEvent.Info(DeviceDetails(p.model, p.manufacturer, p.esphomeVersion, project, area))
         }
         MessageType.LIST_ENTITIES_DONE -> NativeEvent.EntitiesDone
         12 -> Api.ListEntitiesBinarySensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.BinarySensor, category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }

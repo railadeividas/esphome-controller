@@ -42,7 +42,7 @@ class EntityCodecTest {
     }
 
     @Test fun deviceDetailsRoundTrip() {
-        val d = DeviceDetails("esp32dev", "Espressif", "2026.11.0", "acme.lamp 1.0")
+        val d = DeviceDetails("esp32dev", "Espressif", "2026.11.0", "acme.lamp 1.0", "Hallway")
         assertEquals(d, EntityCodec.decodeDetails(EntityCodec.encodeDetails(d)))
         assertNull(EntityCodec.decodeDetails(null))
     }

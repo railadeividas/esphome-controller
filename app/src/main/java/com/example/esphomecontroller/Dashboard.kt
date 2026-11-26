@@ -55,7 +55,7 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
             }
         }
         if (!editing) {
-            Text("${home.devices.size} devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(deviceCount(home.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (home.devices.isNotEmpty()) IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
             IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add device") }
         } else Button(onClick = { editing = false }) { Text("Done") }

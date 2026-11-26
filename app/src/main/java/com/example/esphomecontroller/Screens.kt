@@ -42,6 +42,8 @@ fun connectionSummary(session: ControlSession?, setupError: String?, lastSeen: L
     is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, now)}" } ?: "")
 }
 
+fun deviceCount(n: Int) = if (n == 1) "1 device" else "$n devices"
+
 /** "just now", "5 min ago", "3 h ago", "2 d ago". */
 fun relativeTime(then: Long, now: Long): String {
     val seconds = ((now - then) / 1000).coerceAtLeast(0)
@@ -79,7 +81,7 @@ fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupErr
     Text("Interface: ${if (device.isWeb) "Web server" else "Native API"}")
     Text("Security: ${securityLabel(device)}")
     details?.let { d ->
-        listOf("Model" to d.model, "Manufacturer" to d.manufacturer, "ESPHome" to d.esphomeVersion, "Project" to d.project)
+        listOf("Area" to d.area, "Model" to d.model, "Manufacturer" to d.manufacturer, "ESPHome" to d.esphomeVersion, "Project" to d.project)
             .filter { it.second.isNotBlank() }.forEach { (label, value) -> Text("$label: $value") }
     }
     session?.lastError?.let { Text(it.message, color = MaterialTheme.colorScheme.error) }
@@ -150,7 +152,7 @@ private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp
 fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
     val home = store.home
     Text("Devices", style = MaterialTheme.typography.titleLarge)
-    Text("${store.devices.size} devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(deviceCount(store.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (store.devices.isEmpty()) Text("No devices yet. Add one from Discover.")
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         items(store.devices, key = { it.id }) { d ->
@@ -161,8 +163,8 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
+                        manager.details(d.id)?.area?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(store.homeName(d.homeId) ?: "Not in a home", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -197,6 +199,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleLarge)
+                        details?.area?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, setupError, manager.lastSeen(device.id)), style = MaterialTheme.typography.bodyMedium,
                             color = if (setupError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -232,7 +235,7 @@ private fun deviceFacts(device: HomeStore.Device, details: DeviceDetails?): List
         "Address" to device.address,
         "Interface" to if (device.isWeb) "Web server" else "Native API",
         "Security" to securityLabel(device),
-    ) + listOf("Model" to details?.model, "Manufacturer" to details?.manufacturer, "ESPHome" to details?.esphomeVersion, "Project" to details?.project)
+    ) + listOf("Area" to details?.area, "Model" to details?.model, "Manufacturer" to details?.manufacturer, "ESPHome" to details?.esphomeVersion, "Project" to details?.project)
         .mapNotNull { (k, v) -> v?.takeIf { it.isNotBlank() }?.let { k to it } }
 
 /** Live device logs for the current connection; kept in memory only, never saved or shared. */

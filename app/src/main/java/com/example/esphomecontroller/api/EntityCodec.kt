@@ -15,10 +15,10 @@ object EntityCodec {
         if (array == null) emptyList() else (0 until array.length()).mapNotNull { i -> array.optJSONObject(i)?.let { runCatching { decode(it) }.getOrNull() } }
 
     fun encodeDetails(d: DeviceDetails): JSONObject =
-        JSONObject().put("model", d.model).put("manufacturer", d.manufacturer).put("esphomeVersion", d.esphomeVersion).put("project", d.project)
+        JSONObject().put("model", d.model).put("manufacturer", d.manufacturer).put("esphomeVersion", d.esphomeVersion).put("project", d.project).put("area", d.area)
 
     fun decodeDetails(o: JSONObject?): DeviceDetails? =
-        o?.let { DeviceDetails(it.optString("model"), it.optString("manufacturer"), it.optString("esphomeVersion"), it.optString("project")) }
+        o?.let { DeviceDetails(it.optString("model"), it.optString("manufacturer"), it.optString("esphomeVersion"), it.optString("project"), it.optString("area")) }
 
     private fun strings(list: List<String>) = JSONArray(list)
     private fun JSONObject.strings(key: String) = optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()

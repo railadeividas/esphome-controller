@@ -133,7 +133,7 @@ sealed interface ConnectionState {
 }
 
 /** Optional device metadata reported by the Native API. Identifiers such as MAC addresses are deliberately not kept. */
-data class DeviceDetails(val model: String, val manufacturer: String, val esphomeVersion: String, val project: String)
+data class DeviceDetails(val model: String, val manufacturer: String, val esphomeVersion: String, val project: String, val area: String = "")
 
 fun sameEntity(a: Entity, b: Entity): Boolean =
     if (a.webId != null || b.webId != null) a.webId != null && a.webId == b.webId

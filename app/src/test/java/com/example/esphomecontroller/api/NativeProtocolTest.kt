@@ -25,6 +25,9 @@ class NativeProtocolTest {
         assertEquals(NativeEvent.Hello(1, 12, 30), hello)
         val info = decodeNativeFrame(frame(10, Api.DeviceInfoResponse.newBuilder().setModel("esp32dev").setEsphomeVersion("2026.11.0").setMacAddress("00:00:00:00:00:00").setProjectName("acme.plug").setProjectVersion("1.2").build()))
         assertEquals(NativeEvent.Info(DeviceDetails("esp32dev", "", "2026.11.0", "acme.plug 1.2")), info)
+        val withArea = decodeNativeFrame(frame(10, Api.DeviceInfoResponse.newBuilder().setSuggestedArea("Old area").setArea(Api.AreaInfo.newBuilder().setName("Hallway")).build())) as NativeEvent.Info
+        assertEquals("Hallway", withArea.details.area)
+        assertEquals("Bedroom", (decodeNativeFrame(frame(10, Api.DeviceInfoResponse.newBuilder().setSuggestedArea("Bedroom").build())) as NativeEvent.Info).details.area)
     }
 
     @Test fun decodesEntityMetadataAndCategories() {
