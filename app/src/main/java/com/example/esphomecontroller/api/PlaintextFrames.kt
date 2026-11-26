@@ -32,7 +32,9 @@ object PlaintextFrames {
     fun read(input: InputStream): ApiFrame {
         val marker = input.read()
         if (marker < 0) throw EOFException()
-        if (marker != 0) throw IOException("Invalid plaintext frame marker; device may require encryption")
+        // 0x01 is the Noise indicator: the device expects an encrypted connection.
+        if (marker == 1) throw EncryptionRequiredException()
+        if (marker != 0) throw IOException("Invalid plaintext frame marker")
         val length = readVarint(input)
         val type = readVarint(input)
         if (length > MAX_PAYLOAD || type > 65535) throw IOException("Frame exceeds supported limits")

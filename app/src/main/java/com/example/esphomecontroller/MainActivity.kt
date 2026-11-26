@@ -15,7 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
-    private val devices = mutableStateMapOf<String, String>()
+    private val devices = mutableStateMapOf<String, DiscoveredDevice>()
     private var status by mutableStateOf("Discovery stopped")
     private lateinit var nsd: NsdManager
     private var listener: NsdManager.DiscoveryListener? = null
@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
                         val host = info.host?.hostAddress
                         if (found.containsKey(info.serviceName) && host != null) {
                             val address = joinAddress(host, info.port)
-                            devices[info.serviceName] = address
+                            devices[info.serviceName] = parseEsphomeTxt(info.serviceName, address, info.attributes.orEmpty())
                             store.applyDiscovered(info.serviceName, address)
                         }
                         resolveNext(current)

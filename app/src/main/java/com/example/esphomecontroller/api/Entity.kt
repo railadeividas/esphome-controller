@@ -124,7 +124,8 @@ enum class Security { ENCRYPTED, UNENCRYPTED, WEB }
 sealed interface ConnectionState {
     data object Connecting : ConnectionState
     data class Connected(val security: Security) : ConnectionState
-    data class Failed(val reason: String) : ConnectionState
+    /** [needsSetup]: retrying cannot help (wrong key, encryption mismatch, rejected credentials). */
+    data class Failed(val reason: String, val needsSetup: Boolean = false) : ConnectionState
 }
 
 /** Optional device metadata reported by the Native API. Identifiers such as MAC addresses are deliberately not kept. */

@@ -109,6 +109,11 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         val now = SystemClock.elapsedRealtime()
         for ((id, target) in targets) {
             val session = sessions[id]
+            (session?.connection as? ConnectionState.Failed)?.takeIf { it.needsSetup }?.let { failed ->
+                // A wrong key or encryption mismatch will not fix itself; stop retrying until the settings change.
+                setupErrors[id] = failed.reason; session.close(); sessions.remove(id); return@let
+            }
+            if (id in setupErrors) continue
             when (session?.connection) {
                 is ConnectionState.Connected -> { attempts.remove(id); continue }
                 ConnectionState.Connecting -> continue

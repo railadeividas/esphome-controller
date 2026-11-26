@@ -47,14 +47,15 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
             stream = call
             if (closed) { call.cancel(); return }
             call.execute().use { response ->
-                if (!response.isSuccessful) throw IOException(if (response.code == 401) "Web server rejected credentials" else "Web server returned HTTP ${response.code}")
+                if (response.code == 401) throw CredentialsRejectedException()
+                if (!response.isSuccessful) throw IOException("Web server returned HTTP ${response.code}")
                 if (!(response.header("Content-Type") ?: "").startsWith("text/event-stream", ignoreCase = true)) throw IOException("Web server did not provide events")
                 val source = response.body?.source() ?: throw IOException("Empty web server response")
                 publish { connection = ConnectionState.Connected(Security.WEB) }
                 consumeWebEvents(source, { closed }, onLog = { line -> if (logsWanted) publish { logs = appendLog(logs, stripAnsi(line)) } }, onEvent = ::handle)
                 if (!closed) throw IOException("Web server disconnected")
             }
-        } catch (e: Exception) { publish { connection = ConnectionState.Failed(e.message ?: "Web server unavailable") } }
+        } catch (e: Exception) { publish { connection = ConnectionState.Failed(e.message ?: "Web server unavailable", needsSetup = e is SetupException) } }
     }
     private fun handle(text: String) {
         val decoded = decodeWebEvent(text) ?: return

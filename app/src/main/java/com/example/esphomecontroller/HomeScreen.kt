@@ -24,7 +24,7 @@ import androidx.lifecycle.ViewModelProvider
 private enum class Page { HOME, DEVICES, DISCOVER, SETTINGS }
 
 @Composable
-fun HomeScreen(store: HomeStore, discovered: Map<String, String>, status: String, refresh: () -> Unit) {
+fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, status: String, refresh: () -> Unit) {
     val activity = LocalContext.current as ComponentActivity
     val manager = remember(activity) { ViewModelProvider(activity)[ConnectionManager::class.java] }
     var page by remember { mutableStateOf(Page.HOME) }
@@ -58,9 +58,17 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, String>, status: String
             Column(Modifier.fillMaxSize().statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Spacer(Modifier.height(6.dp))
                 Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    when (page) {
+                    val setup = editing
+                    if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, onDismiss = { editing = null }, onSave = { updated ->
+                        // A different interface yields different entity identities; drop the old cached ones.
+                        if (setup.mode != updated.mode && !(setup.mode == null && updated.mode == "encrypted")) manager.forget(home.id, setup.id)
+                        store.putDevice(updated); editing = null
+                        manager.sync(store.home, active); manager.reconnect(updated.id)
+                        if (isNew) page = Page.HOME
+                    }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
+                    else when (page) {
                         Page.HOME -> DashboardScreen(store, manager, onManageHomes = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
-                        Page.DISCOVER -> DiscoverScreen(home, discovered, status, refresh, onSetup = { edit(it, true) })
+                        Page.DISCOVER -> DiscoverScreen(store, discovered, status, refresh, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = home.devices.firstOrNull { it.id == selectedDevice }
                             if (device == null) DeviceListScreen(store, manager, onOpen = { selectedDevice = it })
@@ -69,7 +77,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, String>, status: String
                         Page.SETTINGS -> SettingsScreen(store)
                     }
                 }
-                NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
+                if (editing == null) NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
                     listOf(Triple(Page.HOME, "Home", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
                         NavigationBarItem(selected = page == target, onClick = { if (target == Page.DEVICES && page == Page.DEVICES) selectedDevice = null; page = target }, icon = { Icon(icon, contentDescription = null) }, label = { Text(label) })
                     }
@@ -84,15 +92,6 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, String>, status: String
                 dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
             )
         } }
-        editing?.let { device ->
-            DeviceSetupDialog(device, isNew, manager.secrets, onDismiss = { editing = null }, onSave = { updated ->
-                // A different interface yields different entity identities; drop the old cached ones.
-                if (device.mode != updated.mode && !(device.mode == null && updated.mode == "encrypted")) manager.forget(home.id, device.id)
-                store.putDevice(updated); editing = null
-                manager.sync(store.home, active); manager.reconnect(updated.id)
-                if (isNew) page = Page.HOME
-            }, onRemove = if (isNew) null else { { editing = null; removeId = device.id } })
-        }
         removeId?.let { id ->
             AlertDialog(
                 onDismissRequest = { removeId = null }, title = { Text("Remove device?") }, text = { Text("The device will be removed from ${home.name}.") },

@@ -95,7 +95,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
             }
         } catch (e: Exception) {
             val reason = if (e is java.net.SocketTimeoutException) "Device stopped responding" else e.message ?: e.javaClass.simpleName
-            publish { connection = ConnectionState.Failed(reason) }
+            publish { connection = ConnectionState.Failed(reason, needsSetup = e is SetupException) }
         } finally {
             key?.fill(0)
             try { frames?.close() } catch (_: Exception) {}

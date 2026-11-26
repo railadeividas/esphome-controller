@@ -97,33 +97,55 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
                 }
                 if (entities.isEmpty()) Text(if (session.isConnected) "Waiting for device states…" else "—", style = MaterialTheme.typography.bodySmall)
                 session?.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                if (setupError != null) TextButton(onClick = { onSetup(d) }) { Text("Finish setup") }
+                if (setupError != null) TextButton(onClick = { onSetup(d) }) { Text("Fix connection settings") }
             }
         }
     }
 }
 
 @Composable
-fun DiscoverScreen(home: HomeStore.Home, discovered: Map<String, String>, status: String, refresh: () -> Unit, onSetup: (HomeStore.Device) -> Unit) {
+fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, status: String, refresh: () -> Unit, onSetup: (HomeStore.Device) -> Unit) {
+    val home = store.home
+    var searches by remember { mutableIntStateOf(0) }
+    // Explain likely causes only after discovery has had time to find something.
+    var waitedLong by remember(searches) { mutableStateOf(false) }
+    LaunchedEffect(searches) { kotlinx.coroutines.delay(10_000); waitedLong = true }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("Choose a device for ${home.name}", style = MaterialTheme.typography.bodySmall) }
-        TextButton(onClick = refresh) { Text("Refresh") }
+        TextButton(onClick = { refresh(); searches++ }) { Text("Refresh") }
     }
     Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    val available = discovered.toList().filterNot { (name, _) -> home.devices.any { it.id == name } }
+    val available = discovered.values.filterNot { d -> home.devices.any { it.id == d.serviceName } }.sortedBy { it.displayName.lowercase() }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         if (available.isEmpty()) item {
-            Text("No new devices found yet. Discovery only works on the same network segment; use manual setup for devices on another VLAN or subnet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        items(available, key = { it.first }) { (name, address) ->
-            Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onSetup(HomeStore.Device(name, name, address)) }) { Text("Set up") }
+            if (!waitedLong) Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text("Looking for ESPHome devices…") }
+            else Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("No new devices found", style = MaterialTheme.typography.titleSmall)
+                    Text("• The phone must be on the same Wi-Fi network as the device.", style = MaterialTheme.typography.bodySmall)
+                    Text("• Discovery (mDNS) does not cross VLANs or subnets unless the network repeats it.", style = MaterialTheme.typography.bodySmall)
+                    Text("• The device needs the api: component; devices already in this home are hidden.", style = MaterialTheme.typography.bodySmall)
+                    Text("You can still add a device by its address.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-        item { OutlinedButton(onClick = { onSetup(HomeStore.Device("manual:${UUID.randomUUID()}", "", ":6053")) }) { Text("Add a device manually") } }
+        items(available, key = { it.serviceName }) { d ->
+            val otherHomes = store.homes.filter { h -> h.id != home.id && h.devices.any { it.id == d.serviceName } }.map { it.name }
+            Card(onClick = { onSetup(HomeStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(d.displayName, style = MaterialTheme.typography.titleMedium)
+                        if (d.summary.isNotBlank()) Text(d.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(encryptionText(d.encryption), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (otherHomes.isNotEmpty()) Text("Also in ${otherHomes.joinToString()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    EncryptionIcon(d.encryption)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Set up", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        item { OutlinedButton(onClick = { onSetup(HomeStore.Device("manual:${UUID.randomUUID()}", "", "")) }) { Text("Add a device by address") } }
     }
 }
 

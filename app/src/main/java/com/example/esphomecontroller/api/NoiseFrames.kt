@@ -17,11 +17,20 @@ class NoiseFrames(private val input: InputStream, private val output: OutputStre
         try {
             writeRaw(byteArrayOf())
             writeRaw(byteArrayOf(0) + handshake.writeMessage().message)
-            val hello = readRaw()
-            if (hello.isEmpty() || hello[0].toInt() != 1) throw IOException("Device does not support ESPHome Noise")
-            val reply = readRaw()
-            if (reply.isEmpty() || reply[0].toInt() != 0) throw IOException("Encryption handshake rejected; check the key")
+            val hello = try { readRaw() } catch (_: EOFException) { throw EncryptionNotEnabledException("it closed the connection") }
+            if (hello.isEmpty() || hello[0].toInt() != 1) throw EncryptionNotEnabledException()
+            val reply = try { readRaw() } catch (_: EOFException) { throw EncryptionNotEnabledException("it closed the connection") }
+            if (reply.isEmpty()) throw IOException("Empty encryption handshake reply")
+            if (reply[0].toInt() != 0) {
+                // The device explains the failure in text after the status byte.
+                val reason = String(reply, 1, reply.size - 1, Charsets.UTF_8)
+                if (reason.contains("indicator", ignoreCase = true)) throw EncryptionNotEnabledException()
+                throw KeyRejectedException()
+            }
             transport = handshake.readMessage(reply.copyOfRange(1, reply.size)).transport ?: throw IOException("Incomplete encryption handshake")
+        } catch (_: java.net.SocketException) {
+            // A plaintext-only device drops the connection when it sees the Noise indicator byte.
+            throw EncryptionNotEnabledException("it closed the connection")
         } finally { handshake.close() }
     }
     @Synchronized override fun write(frame: ApiFrame) {
@@ -45,6 +54,8 @@ class NoiseFrames(private val input: InputStream, private val output: OutputStre
     private fun readRaw(): ByteArray {
         val marker = input.read(); val hi = input.read(); val lo = input.read()
         if (marker < 0 || hi < 0 || lo < 0) throw EOFException()
+        // A plaintext (0x00) frame means the device is not configured for encryption.
+        if (marker == 0) throw EncryptionNotEnabledException()
         if (marker != 1) throw IOException("Invalid Noise frame marker")
         val payload = ByteArray((hi shl 8) or lo); var offset = 0
         while (offset < payload.size) { val n = input.read(payload, offset, payload.size - offset); if (n < 0) throw EOFException(); if (n > 0) offset += n }
