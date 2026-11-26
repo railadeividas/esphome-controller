@@ -265,10 +265,7 @@ private fun DeviceLogs(device: HomeStore.Device, session: ControlSession?, onBac
 private fun LazyListScope.entitySection(title: String, entities: List<Entity>, session: ControlSession?, live: List<Entity>) {
     if (entities.isEmpty()) return
     item(key = "header:$title") {
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 2.dp, end = 2.dp), verticalAlignment = Alignment.Bottom) {
-            Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text("${entities.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp, start = 2.dp))
     }
     // One card per section, rows separated by dividers.
     item(key = "group:$title") {
