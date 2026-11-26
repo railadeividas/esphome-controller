@@ -42,8 +42,8 @@ class NativeProtocolTest {
     }
 
     @Test fun unsupportedPlatformsAreListedGenericallyAndRespectDisabledFlag() {
-        val cover = listed(decodeNativeFrame(frame(13, Api.ListEntitiesCoverResponse.newBuilder().setKey(11).setName("Blinds").setDeviceId(2).setEntityCategory(Api.EntityCategory.ENTITY_CATEGORY_CONFIG).build())))
-        assertEquals(Entity(11, 2, "Blinds", Platform.Unsupported("Cover"), EntityCategory.CONFIG), cover)
+        val player = listed(decodeNativeFrame(frame(63, Api.ListEntitiesMediaPlayerResponse.newBuilder().setKey(11).setName("Speaker").setDeviceId(2).setEntityCategory(Api.EntityCategory.ENTITY_CATEGORY_CONFIG).build())))
+        assertEquals(Entity(11, 2, "Speaker", Platform.Unsupported("Media player"), EntityCategory.CONFIG), player)
         val alarm = listed(decodeNativeFrame(frame(94, Api.ListEntitiesAlarmControlPanelResponse.newBuilder().setKey(12).setObjectId("alarm").build())))
         assertEquals(Platform.Unsupported("Alarm control panel"), alarm.platform)
         assertEquals(NativeEvent.Ignored, decodeNativeFrame(frame(14, Api.ListEntitiesFanResponse.newBuilder().setKey(13).setName("Fan").setDisabledByDefault(true).build())))
@@ -91,7 +91,7 @@ class NativeProtocolTest {
 
         nativeCommand(Entity(4, 9, "Restart", Platform.Button), Command.Press)!!.let { assertEquals(62, it.type); assertEquals(9, Api.ButtonCommandRequest.parseFrom(it.payload).deviceId) }
         assertNull(nativeCommand(Entity(5, 0, "Temp", Platform.Sensor()), Command.SetOn(true)))
-        assertNull(nativeCommand(Entity(6, 0, "Blinds", Platform.Unsupported("Cover")), Command.Press))
+        assertNull(nativeCommand(Entity(6, 0, "Speaker", Platform.Unsupported("Media player")), Command.Press))
     }
 
     /** A recorded-style session: frames survive the plaintext codec and decode in order. */
@@ -106,5 +106,91 @@ class NativeProtocolTest {
         events.forEach { e -> when (e) { is NativeEvent.EntityListed -> entities = entities + e.entity; is NativeEvent.StateChanged -> entities = applyState(entities, e); else -> Unit } }
         assertEquals(NativeEvent.EntitiesDone, events[1])
         assertEquals(EntityState.OnOff(true), entities.single().state)
+    }
+
+    @Test fun decodesLightColourCapabilitiesAndState() {
+        val info = Api.ListEntitiesLightResponse.newBuilder().setKey(1).setName("Strip")
+            .addSupportedColorModesValue(Api.ColorMode.COLOR_MODE_RGB_COLOR_TEMPERATURE_VALUE).setMinMireds(153f).setMaxMireds(500f).addEffects("Rainbow").build()
+        assertEquals(Platform.Light(true, true, 153f, 500f, listOf("Rainbow")), listed(decodeNativeFrame(frame(15, info))).platform)
+        val ctOnly = Api.ListEntitiesLightResponse.newBuilder().setKey(2).addSupportedColorModesValue(Api.ColorMode.COLOR_MODE_COLD_WARM_WHITE_VALUE).setMinMireds(153f).setMaxMireds(370f).build()
+        assertEquals(Platform.Light(true, false, 153f, 370f), listed(decodeNativeFrame(frame(15, ctOnly))).platform)
+        val state = Api.LightStateResponse.newBuilder().setKey(1).setState(true).setBrightness(0.5f).setColorModeValue(Api.ColorMode.COLOR_MODE_RGB_VALUE).setRed(1f).setGreen(0f).setBlue(0.5f).setColorTemperature(300f).setEffect("None").build()
+        assertEquals(EntityState.Light(true, 0.5f, Rgb(1f, 0f, 0.5f), null, null), (decodeNativeFrame(frame(24, state)) as NativeEvent.StateChanged).state)
+        val light = Entity(1, 0, "Strip", Platform.Light(true, true, 153f, 500f, listOf("Rainbow")))
+        Api.LightCommandRequest.parseFrom(nativeCommand(light, Command.SetRgb(Rgb(0f, 1f, 0f)))!!.payload).let { assertTrue(it.hasRgb); assertEquals(1f, it.green, 0f) }
+        Api.LightCommandRequest.parseFrom(nativeCommand(light, Command.SetColorTemperature(250f))!!.payload).let { assertTrue(it.hasColorTemperature); assertEquals(250f, it.colorTemperature, 0f) }
+        assertNull(nativeCommand(light, Command.SetColorTemperature(600f)))
+        assertEquals("None", Api.LightCommandRequest.parseFrom(nativeCommand(light, Command.SetEffect("None"))!!.payload).effect)
+        assertNull(nativeCommand(light, Command.SetEffect("Unknown")))
+        assertNull(nativeCommand(Entity(2, 0, "Plain", Platform.Light(true)), Command.SetRgb(Rgb(1f, 0f, 0f))))
+    }
+
+    @Test fun coversAndValvesUsePositionCommands() {
+        val listing = Api.ListEntitiesCoverResponse.newBuilder().setKey(11).setName("Blinds").setSupportsPosition(true).setSupportsStop(true).build()
+        val cover = listed(decodeNativeFrame(frame(13, listing)))
+        assertEquals(Platform.Cover(supportsPosition = true, supportsTilt = false, supportsStop = true), cover.platform)
+        assertEquals(EntityState.Positioned(0.4f, 0f, Operation.CLOSING), (decodeNativeFrame(frame(22, Api.CoverStateResponse.newBuilder().setKey(11).setPosition(0.4f).setCurrentOperation(Api.CoverOperation.COVER_OPERATION_IS_CLOSING).build())) as NativeEvent.StateChanged).state)
+        Api.CoverCommandRequest.parseFrom(nativeCommand(cover, Command.Open)!!.payload).let { assertTrue(it.hasPosition); assertEquals(1f, it.position, 0f) }
+        assertTrue(Api.CoverCommandRequest.parseFrom(nativeCommand(cover, Command.Stop)!!.payload).stop)
+        assertEquals(0.25f, Api.CoverCommandRequest.parseFrom(nativeCommand(cover, Command.SetPosition(0.25f))!!.payload).position, 0f)
+        assertNull(nativeCommand(cover, Command.SetTilt(0.5f)))
+        val valve = Entity(12, 0, "Water", Platform.Valve(supportsPosition = false, supportsStop = false))
+        assertEquals(30, nativeCommand(cover, Command.Close)!!.type); assertEquals(111, nativeCommand(valve, Command.Close)!!.type)
+        assertNull(nativeCommand(valve, Command.Stop)); assertNull(nativeCommand(valve, Command.SetPosition(0.5f)))
+    }
+
+    @Test fun fansRespectAdvertisedFeatures() {
+        val fan = listed(decodeNativeFrame(frame(14, Api.ListEntitiesFanResponse.newBuilder().setKey(3).setName("Fan").setSupportsSpeed(true).setSupportedSpeedCount(3).setSupportsOscillation(true).addSupportedPresetModes("Sleep").build())))
+        assertEquals(Platform.Fan(supportsOscillation = true, supportsDirection = false, speedCount = 3, presets = listOf("Sleep")), fan.platform)
+        assertEquals(EntityState.Fan(true, false, true, 2, null), (decodeNativeFrame(frame(23, Api.FanStateResponse.newBuilder().setKey(3).setState(true).setSpeedLevel(2).setDirection(Api.FanDirection.FAN_DIRECTION_REVERSE).build())) as NativeEvent.StateChanged).state)
+        Api.FanCommandRequest.parseFrom(nativeCommand(fan, Command.SetFanSpeed(3))!!.payload).let { assertTrue(it.hasSpeedLevel); assertEquals(3, it.speedLevel) }
+        assertNull(nativeCommand(fan, Command.SetFanSpeed(4))); assertNull(nativeCommand(fan, Command.SetDirection(true)))
+        assertEquals("Sleep", Api.FanCommandRequest.parseFrom(nativeCommand(fan, Command.SetPreset("Sleep"))!!.payload).presetMode)
+    }
+
+    @Test fun locksRequireCodeWhenAdvertisedAndOpenOnlyWhenSupported() {
+        val lock = listed(decodeNativeFrame(frame(58, Api.ListEntitiesLockResponse.newBuilder().setKey(4).setName("Door").setRequiresCode(true).build())))
+        assertEquals(Platform.Lock(supportsOpen = false, requiresCode = true), lock.platform)
+        assertEquals(EntityState.Lock(LockStatus.JAMMED), (decodeNativeFrame(frame(59, Api.LockStateResponse.newBuilder().setKey(4).setState(Api.LockState.LOCK_STATE_JAMMED).build())) as NativeEvent.StateChanged).state)
+        assertNull(nativeCommand(lock, Command.Lock(LockAction.UNLOCK)))
+        Api.LockCommandRequest.parseFrom(nativeCommand(lock, Command.Lock(LockAction.UNLOCK, "1234"))!!.payload).let { assertEquals(Api.LockCommand.LOCK_UNLOCK, it.command); assertTrue(it.hasCode); assertEquals("1234", it.code) }
+        assertNull(nativeCommand(lock, Command.Lock(LockAction.OPEN, "1234")))
+    }
+
+    @Test fun climateFeaturesModesAndCommands() {
+        val listing = Api.ListEntitiesClimateResponse.newBuilder().setKey(5).setName("Thermostat")
+            .addSupportedModes(Api.ClimateMode.CLIMATE_MODE_OFF).addSupportedModes(Api.ClimateMode.CLIMATE_MODE_HEAT_COOL)
+            .setVisualMinTemperature(10f).setVisualMaxTemperature(30f).setVisualTargetTemperatureStep(0.5f)
+            .addSupportedFanModes(Api.ClimateFanMode.CLIMATE_FAN_AUTO).addSupportedCustomFanModes("Turbo")
+            .addSupportedPresets(Api.ClimatePreset.CLIMATE_PRESET_ECO).setFeatureFlags(1 or 2 or 32).build()
+        val climate = listed(decodeNativeFrame(frame(46, listing)))
+        val p = climate.platform as Platform.Climate
+        assertEquals(listOf("Off", "Heat cool"), p.modes); assertEquals(listOf("Auto", "Turbo"), p.fanModes); assertEquals(listOf("Eco"), p.presets)
+        assertTrue(p.twoPoint && p.currentTemperature && p.action); assertFalse(p.currentHumidity)
+        @Suppress("DEPRECATION") val legacy = listing.toBuilder().setFeatureFlags(0).setSupportsTwoPointTargetTemperature(false).setSupportsCurrentTemperature(true).build()
+        assertEquals(1, climateFeatures(legacy))
+
+        val state = decodeNativeFrame(frame(47, Api.ClimateStateResponse.newBuilder().setKey(5).setMode(Api.ClimateMode.CLIMATE_MODE_HEAT_COOL).setCurrentTemperature(21.3f).setTargetTemperatureLow(19f).setTargetTemperatureHigh(24f).setCustomFanMode("Turbo").setAction(Api.ClimateAction.CLIMATE_ACTION_HEATING).build()))
+        val s = (state as NativeEvent.StateChanged).state as EntityState.Climate
+        assertEquals("Heat cool", s.mode); assertEquals("Turbo", s.fanMode); assertEquals("Heating", s.action); assertEquals(19f, s.targetLow!!, 0f)
+        assertEquals(NativeEvent.StateChanged(5, 0, EntityState.Missing), decodeNativeFrame(frame(47, Api.ClimateStateResponse.newBuilder().setKey(5).setMissingState(true).build())))
+
+        assertEquals(Api.ClimateMode.CLIMATE_MODE_HEAT_COOL, Api.ClimateCommandRequest.parseFrom(nativeCommand(climate, Command.SetClimateMode("Heat cool"))!!.payload).mode)
+        assertNull(nativeCommand(climate, Command.SetClimateMode("Cool")))
+        Api.ClimateCommandRequest.parseFrom(nativeCommand(climate, Command.SetTargetRange(18f, 25f))!!.payload).let { assertTrue(it.hasTargetTemperatureLow && it.hasTargetTemperatureHigh) }
+        assertNull(nativeCommand(climate, Command.SetTargetTemperature(20f)))
+        assertNull(nativeCommand(climate, Command.SetTargetRange(5f, 25f)))
+        Api.ClimateCommandRequest.parseFrom(nativeCommand(climate, Command.SetFanMode("Turbo"))!!.payload).let { assertTrue(it.hasCustomFanMode); assertFalse(it.hasFanMode) }
+        Api.ClimateCommandRequest.parseFrom(nativeCommand(climate, Command.SetFanMode("Auto"))!!.payload).let { assertEquals(Api.ClimateFanMode.CLIMATE_FAN_AUTO, it.fanMode) }
+        assertEquals(Api.ClimatePreset.CLIMATE_PRESET_ECO, Api.ClimateCommandRequest.parseFrom(nativeCommand(climate, Command.SetPreset("Eco"))!!.payload).preset)
+        assertEquals("21.3 °C", displayValue(climate.copy(state = s), java.util.Locale.ROOT))
+    }
+
+    @Test fun logsAreDecodedWithoutColourCodesAndBounded() {
+        val log = decodeNativeFrame(frame(29, Api.SubscribeLogsResponse.newBuilder().setLevelValue(3).setMessage(com.google.protobuf.ByteString.copyFromUtf8("\u001B[0;32m[I][app:100]: Running\u001B[0m")).build()))
+        assertEquals(NativeEvent.Log(3, "[I][app:100]: Running"), log)
+        assertEquals(28, subscribeLogsFrame().type)
+        val lines = (1..MAX_LOG_LINES + 5).fold(emptyList<String>()) { acc, i -> appendLog(acc, "line $i") }
+        assertEquals(MAX_LOG_LINES, lines.size); assertEquals("line ${MAX_LOG_LINES + 5}", lines.last())
     }
 }

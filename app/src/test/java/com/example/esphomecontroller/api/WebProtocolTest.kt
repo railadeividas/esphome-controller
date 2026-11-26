@@ -30,8 +30,8 @@ class WebProtocolTest {
         assertEquals(EntityState.Text("21.4 °C"), sensor.state)
         assertTrue(decodeWebEvent("""{"id":"sensor-hidden","is_disabled_by_default":true}""")!!.hidden)
         assertNull(decodeWebEvent("not json"))
-        val cover = decodeWebEvent("""{"id":"cover/Garage door","state":"OPEN"}""")!!
-        assertEquals(Platform.Unsupported("Cover"), cover.platform); assertNull(cover.state)
+        val climate = decodeWebEvent("""{"id":"climate/Heater","mode":"HEAT"}""")!!
+        assertEquals(Platform.Unsupported("Climate"), climate.platform); assertNull(climate.state)
     }
     @Test fun buildsOnlySupportedCommandsAndEscapesEntityNames() {
         MockWebServer().use { server ->
@@ -82,5 +82,49 @@ class WebProtocolTest {
             server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "http://example.com/"))
             createWebClient("user", "password").newCall(Request.Builder().url(server.url("/events")).build()).execute().use { assertEquals(302, it.code) }
         }
+    }
+
+    @Test fun decodesNewWebPlatforms() {
+        val number = decodeWebEvent("""{"id":"number/Delay","value":"24.0","state":"24.0 s"}""")!!
+        assertTrue(number.needsDetail); assertEquals(EntityState.Numeric(24f), number.state)
+        val detailed = decodeWebEvent("""{"id":"number/Delay","value":"24.0","min_value":"0","max_value":"60","step":"0.5","mode":2,"uom":"s"}""")!!
+        assertFalse(detailed.needsDetail); assertEquals(Platform.Number(0f, 60f, 0.5f, "s", NumberMode.SLIDER), detailed.platform)
+        assertEquals(Platform.Button, decodeWebEvent("""{"id":"button/Restart"}""")!!.platform)
+        val cover = decodeWebEvent("""{"id":"cover/Blinds","value":0.3,"state":"OPEN","current_operation":"OPENING","position":0.3,"tilt":1.0}""")!!
+        assertEquals(Platform.Cover(true, true, true), cover.platform); assertEquals(EntityState.Positioned(0.3f, 1f, Operation.OPENING), cover.state)
+        val valve = decodeWebEvent("""{"id":"valve/Water","value":0.0,"state":"CLOSED","current_operation":"IDLE"}""")!!
+        assertEquals(Platform.Valve(false, true), valve.platform); assertEquals(EntityState.Positioned(0f, null, Operation.IDLE), valve.state)
+        val fan = decodeWebEvent("""{"id":"fan/Fan","value":true,"state":"ON","speed_level":2,"speed_count":3,"oscillation":false}""")!!
+        assertEquals(Platform.Fan(true, false, 3), fan.platform); assertEquals(EntityState.Fan(true, false, false, 2, null), fan.state)
+        assertEquals(EntityState.Lock(LockStatus.LOCKED), decodeWebEvent("""{"id":"lock/Door","value":1,"state":"LOCKED"}""")!!.state)
+    }
+
+    @Test fun buildsWebRequestsForNewPlatforms() {
+        MockWebServer().use { server ->
+            val base = server.url("/")
+            fun path(entity: Entity, command: Command): String? = createWebRequest(base, entity, command)?.url?.let { it.encodedPath + (it.encodedQuery?.let { q -> "?$q" } ?: "") }
+            val number = Entity(1, 0, "Delay", Platform.Number(0f, 60f, 0.5f), webId = "number/Delay")
+            assertEquals("/number/Delay/set?value=12.5", path(number, Command.SetNumber(12.5f)))
+            assertNull(path(number, Command.SetNumber(61f)))
+            assertEquals("/button/Restart/press", path(Entity(2, 0, "Restart", Platform.Button, webId = "button/Restart"), Command.Press))
+            val cover = Entity(3, 0, "Blinds", Platform.Cover(true, false, true), webId = "cover/Blinds")
+            assertEquals("/cover/Blinds/open", path(cover, Command.Open))
+            assertEquals("/cover/Blinds/set?position=0.250", path(cover, Command.SetPosition(0.25f)))
+            assertNull(path(cover, Command.SetTilt(0.5f)))
+            val fan = Entity(4, 0, "Fan", Platform.Fan(true, false, 3), webId = "fan/Fan", state = EntityState.Fan(false, false, false, 1, null))
+            assertEquals("/fan/Fan/turn_on?speed_level=2", path(fan, Command.SetFanSpeed(2)))
+            assertEquals("/fan/Fan/turn_off?oscillation=on", path(fan, Command.SetOscillation(true)))
+            val lock = Entity(5, 0, "Door", Platform.Lock(false, false), webId = "lock/Door")
+            assertEquals("/lock/Door/unlock", path(lock, Command.Lock(LockAction.UNLOCK)))
+            assertNull(path(lock, Command.Lock(LockAction.OPEN)))
+            assertNull(createWebAction(base, "sensor/Temp", "set"))
+        }
+    }
+
+    @Test fun logEventsAreDeliveredSeparately() {
+        val buffer = Buffer().writeUtf8("event: log\ndata: [I][app]: hello\n\nevent: state\ndata: {\"id\":\"switch/Relay\",\"state\":\"ON\"}\n\n")
+        val logs = mutableListOf<String>(); val events = mutableListOf<String>()
+        assertThrows(EOFException::class.java) { consumeWebEvents(buffer, { false }, onLog = { logs.add(it) }) { events.add(it) } }
+        assertEquals(listOf("[I][app]: hello"), logs); assertEquals(1, events.size)
     }
 }

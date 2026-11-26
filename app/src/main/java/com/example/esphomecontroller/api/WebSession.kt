@@ -26,6 +26,10 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override val details: DeviceDetails? = null
     override var lastError by mutableStateOf<String?>(null); private set
+    override var logs by mutableStateOf<List<String>>(emptyList()); private set
+    /** The event stream always carries logs; they are only kept once requested. */
+    @Volatile private var logsWanted = false
+    override fun subscribeLogs() { logsWanted = true }
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val base = HttpUrl.Builder().scheme("http").host(host).port(port).build()
@@ -34,7 +38,7 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     @Volatile private var closed = false
     private var nextKey = 0
     private val pendingDetails = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    private val optionsKnown = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val detailsKnown = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     init { Thread({ listen() }, "esphome-web-events").start() }
     private fun publish(block: () -> Unit) { main.post { if (!closed) block() } }
     private fun listen() {
@@ -47,7 +51,7 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                 if (!(response.header("Content-Type") ?: "").startsWith("text/event-stream", ignoreCase = true)) throw IOException("Web server did not provide events")
                 val source = response.body?.source() ?: throw IOException("Empty web server response")
                 publish { connection = ConnectionState.Connected(Security.WEB) }
-                consumeWebEvents(source, { closed }, ::handle)
+                consumeWebEvents(source, { closed }, onLog = { line -> if (logsWanted) publish { logs = appendLog(logs, stripAnsi(line)) } }, onEvent = ::handle)
                 if (!closed) throw IOException("Web server disconnected")
             }
         } catch (e: Exception) { publish { connection = ConnectionState.Failed(e.message ?: "Web server unavailable") } }
@@ -56,17 +60,17 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
         val decoded = decodeWebEvent(text) ?: return
         val id = decoded.id
         if (decoded.hidden) { publish { entities = entities.filterNot { it.webId == id } }; return }
-        if (decoded.options != null) optionsKnown.add(id)
+        if (!decoded.needsDetail) detailsKnown.add(id)
         publish {
             val old = entities.firstOrNull { it.webId == id }
-            // Options may arrive only once (detail=all); keep them across later state-only events.
-            val platform = if (decoded.platform is Platform.Select && decoded.options == null) (old?.platform as? Platform.Select) ?: decoded.platform else decoded.platform
+            // Ranges and options arrive only with detail=all; keep them across later state-only events.
+            val platform = if (decoded.needsDetail) old?.platform?.takeIf { it::class == decoded.platform::class } ?: decoded.platform else decoded.platform
             val entity = Entity(old?.key ?: ++nextKey, 0, decoded.name, platform, webId = id, state = decoded.state)
             entities = if (old == null) entities + entity else entities.map { if (it.webId == id) entity else it }
         }
-        if (decoded.platform is Platform.Select && decoded.options == null && id !in optionsKnown && pendingDetails.add(id)) fetchSelectOptions(id)
+        if (decoded.needsDetail && id !in detailsKnown && pendingDetails.add(id)) fetchDetail(id)
     }
-    private fun fetchSelectOptions(id: String) {
+    private fun fetchDetail(id: String) {
         val parts = parseWebId(id) ?: return
         executor.execute {
             try {
@@ -78,22 +82,16 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                     val source = response.body?.source() ?: return@use
                     source.request(65537)
                     if (source.buffer.size > 65536) return@use
-                    val options = decodeWebEvent(source.readUtf8())?.options ?: return@use
-                    optionsKnown.add(id)
-                    publish { entities = entities.map { if (it.webId == id) it.copy(platform = Platform.Select(options)) else it } }
+                    val detail = decodeWebEvent(source.readUtf8())?.takeIf { !it.needsDetail } ?: return@use
+                    detailsKnown.add(id)
+                    publish { entities = entities.map { if (it.webId == id && it.platform::class == detail.platform::class) it.copy(platform = detail.platform) else it } }
                 }
             } catch (_: Exception) { /* The next state event may retry metadata retrieval. */ }
             finally { pendingDetails.remove(id) }
         }
     }
     override fun send(entity: Entity, command: Command) {
-        val id = entity.webId ?: return
-        val request = when (command) {
-            is Command.SetOn -> createWebCommand(base, id, if (command.on) "turn_on" else "turn_off", null)
-            is Command.SetBrightness -> createWebCommand(base, id, "turn_on", (command.brightness.coerceIn(0f, 1f) * 255).toInt())
-            is Command.SelectOption -> if ((entity.platform as? Platform.Select)?.options?.contains(command.option) == true) createWebSelectCommand(base, id, command.option) else null
-            else -> null
-        } ?: return
+        val request = createWebRequest(base, entity, command) ?: return
         try {
             executor.execute {
                 try {
@@ -122,7 +120,11 @@ fun createWebClient(username: String?, password: String?): OkHttpClient =
             }
         }.build()
 
-data class WebSnapshot(val id: String, val name: String, val platform: Platform, val state: EntityState?, val options: List<String>?, val hidden: Boolean = false)
+data class WebSnapshot(val id: String, val name: String, val platform: Platform, val state: EntityState?, val options: List<String>?, val hidden: Boolean = false, val needsDetail: Boolean = false)
+
+private fun JSONObject.float(key: String): Float? = if (!has(key)) null else (opt(key) as? Number)?.toFloat() ?: optString(key).trim().toFloatOrNull()
+
+private fun operation(obj: JSONObject) = when (obj.optString("current_operation").uppercase()) { "OPENING" -> Operation.OPENING; "CLOSING" -> Operation.CLOSING; else -> Operation.IDLE }
 
 fun decodeWebEvent(text: String): WebSnapshot? {
     val obj = try { JSONObject(text) } catch (_: Exception) { return null }
@@ -132,9 +134,10 @@ fun decodeWebEvent(text: String): WebSnapshot? {
     val name = obj.optString("name").ifBlank { parsed.last() }
     val options = obj.optJSONArray("option")?.let { array -> (0 until array.length()).mapNotNull { i -> array.opt(i) as? String } }
     if (obj.optBoolean("is_disabled_by_default", false)) return WebSnapshot(id, name, Platform.Unsupported(domain), null, null, hidden = true)
-    fun onOff(): Boolean? = when (obj.optString("state", obj.optString("value")).uppercase()) { "ON", "TRUE" -> true; "OFF", "FALSE" -> false; else -> null }
+    fun onOff(): Boolean? = when (val v = obj.opt("value")) { is Boolean -> v; else -> when (obj.optString("state", obj.optString("value")).uppercase()) { "ON", "TRUE" -> true; "OFF", "FALSE" -> false; else -> null } }
     // Sensor states are already formatted by the device, including the unit.
     val text = obj.optString("state").takeIf { it.isNotBlank() }
+    var needsDetail = false
     val platform: Platform; val state: EntityState?
     when (domain) {
         "light" -> {
@@ -145,10 +148,82 @@ fun decodeWebEvent(text: String): WebSnapshot? {
         "binary_sensor" -> { platform = Platform.BinarySensor; state = onOff()?.let { EntityState.OnOff(it) } ?: EntityState.Missing }
         "sensor" -> { platform = Platform.Sensor(); state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
         "text_sensor" -> { platform = Platform.TextSensor; state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
-        "select" -> { platform = Platform.Select(options.orEmpty()); state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
+        "select" -> { platform = Platform.Select(options.orEmpty()); state = text?.let { EntityState.Text(it) } ?: EntityState.Missing; needsDetail = options == null }
+        "number" -> {
+            val min = obj.float("min_value"); val max = obj.float("max_value"); val step = obj.float("step")
+            needsDetail = min == null || max == null
+            val mode = when (obj.optInt("mode", 0)) { 1 -> NumberMode.BOX; 2 -> NumberMode.SLIDER; else -> NumberMode.AUTO }
+            platform = Platform.Number(min ?: 0f, max ?: 0f, step ?: 0f, obj.optString("uom"), mode)
+            state = obj.float("value")?.takeIf { it.isFinite() }?.let { EntityState.Numeric(it) } ?: EntityState.Missing
+        }
+        "button" -> { platform = Platform.Button; state = null }
+        "cover", "valve" -> {
+            val position = obj.float("position") ?: if (obj.optString("state").uppercase() == "CLOSED") 0f else 1f
+            val tilt = obj.float("tilt")
+            platform = if (domain == "cover") Platform.Cover(obj.has("position"), tilt != null, true) else Platform.Valve(obj.has("position"), true)
+            state = EntityState.Positioned(position.coerceIn(0f, 1f), tilt?.coerceIn(0f, 1f), operation(obj))
+        }
+        "fan" -> {
+            platform = Platform.Fan(obj.has("oscillation"), false, if (obj.has("speed_level")) obj.optInt("speed_count", 0).coerceAtLeast(0) else 0)
+            state = onOff()?.let { EntityState.Fan(it, obj.optBoolean("oscillation", false), false, obj.optInt("speed_level", 0), null) } ?: EntityState.Missing
+        }
+        "lock" -> {
+            platform = Platform.Lock(supportsOpen = false, requiresCode = false)
+            val byName = LockStatus.entries.firstOrNull { it.name == obj.optString("state").uppercase() }
+            val byValue = (obj.opt("value") as? Number)?.toInt()?.let { LockStatus.entries.getOrNull(it) }
+            state = EntityState.Lock(byName ?: byValue ?: LockStatus.UNKNOWN)
+        }
         else -> { platform = Platform.Unsupported(domain.replace('_', ' ').replaceFirstChar { it.uppercase() }); state = null }
     }
-    return WebSnapshot(id, name, platform, state, options)
+    return WebSnapshot(id, name, platform, state, options, needsDetail = needsDetail)
+}
+
+private val webActions = mapOf(
+    "light" to setOf("turn_on", "turn_off"), "switch" to setOf("turn_on", "turn_off"), "fan" to setOf("turn_on", "turn_off"),
+    "select" to setOf("set"), "number" to setOf("set"), "button" to setOf("press"),
+    "cover" to setOf("open", "close", "stop", "set"), "valve" to setOf("open", "close", "stop", "set"), "lock" to setOf("lock", "unlock", "open"),
+)
+
+/** Builds a POST for an action the web server implements for this domain; null otherwise. */
+fun createWebAction(base: HttpUrl, id: String, action: String, params: Map<String, String> = emptyMap()): Request? {
+    val path = parseWebId(id) ?: return null
+    if (action !in webActions[path.first()].orEmpty()) return null
+    val builder = base.newBuilder(); path.forEach { builder.addPathSegment(it) }; builder.addPathSegment(action)
+    params.forEach { (k, v) -> builder.addQueryParameter(k, v) }
+    return Request.Builder().url(builder.build()).post(ByteArray(0).toRequestBody()).build()
+}
+
+private fun fraction(v: Float) = String.format(java.util.Locale.ROOT, "%.3f", v)
+
+/** Maps a command to the web server's REST action, respecting the entity's advertised capabilities. */
+fun createWebRequest(base: HttpUrl, entity: Entity, command: Command): Request? {
+    val id = entity.webId ?: return null
+    val p = entity.platform
+    return when {
+        command is Command.SetOn && (p is Platform.Light || p == Platform.Switch || p is Platform.Fan) -> createWebAction(base, id, if (command.on) "turn_on" else "turn_off")
+        command is Command.SetBrightness && p is Platform.Light -> createWebCommand(base, id, "turn_on", (command.brightness.coerceIn(0f, 1f) * 255).toInt())
+        command is Command.SelectOption && p is Platform.Select && command.option in p.options -> createWebSelectCommand(base, id, command.option)
+        command is Command.SetNumber && p is Platform.Number && p.max > p.min && command.value in p.min..p.max -> createWebAction(base, id, "set", mapOf("value" to command.value.toBigDecimal().stripTrailingZeros().toPlainString()))
+        command == Command.Press && p == Platform.Button -> createWebAction(base, id, "press")
+        p is Platform.Cover || p is Platform.Valve -> {
+            val position = (p as? Platform.Cover)?.supportsPosition ?: (p as Platform.Valve).supportsPosition
+            when {
+                command == Command.Open -> createWebAction(base, id, "open")
+                command == Command.Close -> createWebAction(base, id, "close")
+                command == Command.Stop -> createWebAction(base, id, "stop")
+                command is Command.SetPosition && position && command.position in 0f..1f -> createWebAction(base, id, "set", mapOf("position" to fraction(command.position)))
+                command is Command.SetTilt && (p as? Platform.Cover)?.supportsTilt == true && command.tilt in 0f..1f -> createWebAction(base, id, "set", mapOf("tilt" to fraction(command.tilt)))
+                else -> null
+            }
+        }
+        p is Platform.Fan && command is Command.SetFanSpeed && command.level in 1..p.speedCount -> createWebAction(base, id, "turn_on", mapOf("speed_level" to command.level.toString()))
+        // The handler accepts oscillation on both turn_on and turn_off; keep the current power state.
+        p is Platform.Fan && command is Command.SetOscillation && p.supportsOscillation ->
+            createWebAction(base, id, if (isOn(entity.state) == true) "turn_on" else "turn_off", mapOf("oscillation" to if (command.on) "on" else "off"))
+        p is Platform.Lock && command is Command.Lock && command.code.isNullOrEmpty() && (command.action != LockAction.OPEN || p.supportsOpen) ->
+            createWebAction(base, id, command.action.name.lowercase())
+        else -> null
+    }
 }
 
 fun createWebCommand(base: HttpUrl, id: String, action: String, brightness: Int?): Request? {
@@ -161,12 +236,16 @@ fun createWebCommand(base: HttpUrl, id: String, action: String, brightness: Int?
 }
 
 /** Parse SSE records incrementally; logs and pings are deliberately ignored. */
-fun consumeWebEvents(source: BufferedSource, isClosed: () -> Boolean, onEvent: (String) -> Unit) {
+fun consumeWebEvents(source: BufferedSource, isClosed: () -> Boolean, onLog: (String) -> Unit = {}, onEvent: (String) -> Unit) {
     var event = ""; val data = StringBuilder()
     while (!isClosed()) {
         val line = source.readUtf8LineStrict(65536)
         when {
-            line.isEmpty() -> { if ((event == "state" || event == "all") && data.isNotEmpty()) onEvent(data.toString()); event = ""; data.clear() }
+            line.isEmpty() -> {
+                if ((event == "state" || event == "all") && data.isNotEmpty()) onEvent(data.toString())
+                else if (event == "log" && data.isNotEmpty()) onLog(data.toString())
+                event = ""; data.clear()
+            }
             line.startsWith("event:") -> event = line.substringAfter(':').trim()
             line.startsWith("data:") -> {
                 if (data.length + line.length > 65536) throw IOException("Web server event too large")

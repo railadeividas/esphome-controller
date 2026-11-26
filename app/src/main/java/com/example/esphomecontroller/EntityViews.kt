@@ -1,25 +1,22 @@
 package com.example.esphomecontroller
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.RadioButtonChecked
-import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.ToggleOn
-import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.esphomecontroller.api.*
@@ -33,17 +30,28 @@ private fun Platform.icon(): ImageVector = when (this) {
     is Platform.Number -> Icons.Default.Tune
     is Platform.Select -> Icons.AutoMirrored.Filled.List
     is Platform.Sensor -> Icons.Default.Sensors
+    is Platform.Cover -> Icons.Default.Blinds
+    is Platform.Valve -> Icons.Default.WaterDrop
+    is Platform.Fan -> Icons.Default.Air
+    is Platform.Lock -> Icons.Default.Lock
+    is Platform.Climate -> Icons.Default.Thermostat
     is Platform.Unsupported -> Icons.AutoMirrored.Filled.HelpOutline
 }
 
-private val Platform.isToggle get() = this is Platform.Light || this == Platform.Switch
-/** Platforms whose value is shown as text next to the icon or name. */
-private val Platform.isReadOnly get() = this is Platform.Sensor || this == Platform.BinarySensor || this == Platform.TextSensor
+private val Platform.isToggle get() = this is Platform.Light || this == Platform.Switch || this is Platform.Fan
+/** Platforms whose current value is shown as text next to the icon or name. */
+private val Platform.showsValue get() = this is Platform.Sensor || this == Platform.BinarySensor || this == Platform.TextSensor ||
+    this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
+
+/** Wraps a send so that only the live (current-connection) entity is ever commanded. */
+private class Sender(val session: ControlSession?, val live: Entity?, val ready: Boolean) {
+    operator fun invoke(command: Command) { if (ready && live != null) session?.send(live, command) }
+}
 
 /** Dashboard tile. [entity] may be cached; [live] is the current connection's copy and gates commands. */
 @Composable
 fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier) {
-    val ready = isCommandReady(session.isConnected, live)
+    val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
     Card(modifier.heightIn(min = 142.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -51,20 +59,24 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
                 Icon(p.icon(), contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
                 if (p.isToggle) {
                     Spacer(Modifier.weight(1f))
-                    PowerButton(entity, session, live, ready)
-                } else if (p.isReadOnly) {
+                    PowerButton(entity, live, send)
+                } else if (p.showsValue) {
                     Spacer(Modifier.width(8.dp))
                     Text(displayValue(entity) ?: "—", textAlign = TextAlign.End, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 }
             }
             Text(entity.name, style = MaterialTheme.typography.titleSmall, maxLines = 2)
             when (p) {
-                is Platform.Light -> if (p.supportsBrightness && (entity.state as? EntityState.Light)?.brightness != null) BrightnessSlider(entity, session, live, ready)
-                    else OnOffCaption(entity)
-                Platform.Switch -> OnOffCaption(entity)
-                is Platform.Select -> SelectControl(entity, session, live, ready)
-                is Platform.Number -> NumberControl(entity, session, live, ready)
-                Platform.Button -> PressButton(entity, session, live, ready)
+                is Platform.Light -> if (p.supportsBrightness && (entity.state as? EntityState.Light)?.brightness != null) BrightnessSlider(entity, send) else Caption(onOffText(entity))
+                Platform.Switch -> Caption(onOffText(entity))
+                is Platform.Fan -> Caption(displayValue(entity) ?: onOffText(entity))
+                is Platform.Select -> SelectControl(entity, live, send)
+                is Platform.Number -> NumberControl(entity, send)
+                Platform.Button -> PressButton(entity, send)
+                is Platform.Cover -> PositionButtons(p.supportsStop, send)
+                is Platform.Valve -> PositionButtons(p.supportsStop, send)
+                is Platform.Lock -> LockButtons(entity, p, send, includeOpen = false)
+                is Platform.Climate -> ClimateTarget(entity, p, send)
                 is Platform.Unsupported -> UnsupportedCaption(p)
                 else -> Unit
             }
@@ -72,49 +84,69 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
     }
 }
 
-/** Device page row: name on the left, value or control aligned on the right. */
+/** Device page row: name on the left, value or main control on the right, secondary controls below. */
 @Composable
 fun EntityDetailRow(entity: Entity, session: ControlSession?, live: Entity?) {
-    val ready = isCommandReady(session.isConnected, live)
+    val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(entity.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 when (p) {
-                    is Platform.Light, Platform.Switch -> Switch(checked = isOn(entity.state) == true, enabled = ready, onCheckedChange = { if (live != null) session?.send(live, Command.SetOn(it)) })
-                    is Platform.Select -> SelectControl(entity, session, live, ready)
-                    Platform.Button -> PressButton(entity, session, live, ready)
+                    is Platform.Light, Platform.Switch, is Platform.Fan -> Switch(checked = isOn(entity.state) == true, enabled = send.ready, onCheckedChange = { send(Command.SetOn(it)) })
+                    is Platform.Select -> SelectControl(entity, live, send)
+                    Platform.Button -> PressButton(entity, send)
                     is Platform.Unsupported -> UnsupportedCaption(p)
                     is Platform.Number -> Unit
                     else -> Text(displayValue(entity) ?: "—", Modifier.weight(1f).padding(start = 12.dp), textAlign = TextAlign.End)
                 }
             }
-            if (p is Platform.Light && p.supportsBrightness && (entity.state as? EntityState.Light)?.brightness != null) {
-                Text("Brightness", style = MaterialTheme.typography.bodySmall)
-                BrightnessSlider(entity, session, live, ready)
+            when (p) {
+                is Platform.Light -> LightControls(entity, p, send)
+                is Platform.Number -> NumberControl(entity, send)
+                is Platform.Cover -> {
+                    PositionButtons(p.supportsStop, send)
+                    val s = entity.state as? EntityState.Positioned
+                    if (p.supportsPosition && s != null) FractionSlider("Position", s.position, send.ready) { send(Command.SetPosition(it)) }
+                    if (p.supportsTilt && s?.tilt != null) FractionSlider("Tilt", s.tilt, send.ready) { send(Command.SetTilt(it)) }
+                }
+                is Platform.Valve -> {
+                    PositionButtons(p.supportsStop, send)
+                    val s = entity.state as? EntityState.Positioned
+                    if (p.supportsPosition && s != null) FractionSlider("Position", s.position, send.ready) { send(Command.SetPosition(it)) }
+                }
+                is Platform.Fan -> FanControls(entity, p, send)
+                is Platform.Lock -> LockButtons(entity, p, send, includeOpen = true)
+                is Platform.Climate -> ClimateControls(entity, p, send)
+                else -> Unit
             }
-            if (p is Platform.Number) NumberControl(entity, session, live, ready)
         }
     }
 }
 
+private fun onOffText(entity: Entity) = when (isOn(entity.state)) { true -> "On"; false -> "Off"; null -> if (entity.state == EntityState.Missing) "Unknown" else "Waiting for state" }
+
 @Composable
-private fun OnOffCaption(entity: Entity) {
-    val text = when (isOn(entity.state)) { true -> "On"; false -> "Off"; null -> if (entity.state == EntityState.Missing) "Unknown" else "Waiting for state" }
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Caption(text: String) = Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+@Composable
+private fun UnsupportedCaption(p: Platform.Unsupported) = Caption("${p.platform} · not supported yet")
+
+@Composable
+private fun LabeledRow(label: String, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        content()
+    }
 }
 
 @Composable
-private fun UnsupportedCaption(p: Platform.Unsupported) =
-    Text("${p.platform} · not supported yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-@Composable
-private fun PowerButton(entity: Entity, session: ControlSession?, live: Entity?, ready: Boolean) {
+private fun PowerButton(entity: Entity, live: Entity?, send: Sender) {
     val on = isOn(entity.state) == true
     FilledTonalIconButton(
-        enabled = ready,
-        onClick = { if (live != null) session?.send(live, Command.SetOn(isOn(live.state) != true)) },
+        enabled = send.ready,
+        onClick = { send(Command.SetOn(isOn(live?.state) != true)) },
         colors = IconButtonDefaults.filledTonalIconButtonColors(
             containerColor = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
             contentColor = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
@@ -123,61 +155,181 @@ private fun PowerButton(entity: Entity, session: ControlSession?, live: Entity?,
 }
 
 @Composable
-private fun BrightnessSlider(entity: Entity, session: ControlSession?, live: Entity?, ready: Boolean) {
+private fun BrightnessSlider(entity: Entity, send: Sender) {
     val brightness = (entity.state as? EntityState.Light)?.brightness ?: return
     var slider by remember(entity.stableId, brightness) { mutableFloatStateOf(brightness.coerceIn(0f, 1f)) }
-    Slider(value = slider, enabled = ready, onValueChange = { slider = it }, onValueChangeFinished = { if (live != null) session?.send(live, Command.SetBrightness(slider)) }, modifier = Modifier.fillMaxWidth())
+    Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.fillMaxWidth())
+}
+
+/** A slider that sends only when released, showing a percentage. */
+@Composable
+private fun FractionSlider(label: String, value: Float, enabled: Boolean, onSet: (Float) -> Unit) {
+    var slider by remember(label, value) { mutableFloatStateOf(value.coerceIn(0f, 1f)) }
+    Text("$label · ${Math.round(slider * 100)}%", style = MaterialTheme.typography.bodySmall)
+    Slider(value = slider, enabled = enabled, onValueChange = { slider = it }, onValueChangeFinished = { onSet(slider) }, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
-private fun SelectControl(entity: Entity, session: ControlSession?, live: Entity?, ready: Boolean) {
-    var expanded by remember(entity.stableId) { mutableStateOf(false) }
+private fun OptionDropdown(value: String?, options: List<String>, enabled: Boolean, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(enabled = ready, onClick = { expanded = true }) { Text(displayValue(entity) ?: "—", maxLines = 1) }
-        DropdownMenu(expanded = expanded && ready, onDismissRequest = { expanded = false }) {
-            (live?.platform as? Platform.Select)?.options.orEmpty().forEach { option ->
-                DropdownMenuItem(text = { Text(option) }, onClick = { expanded = false; if (live != null) session?.send(live, Command.SelectOption(option)) })
-            }
+        OutlinedButton(enabled = enabled && options.isNotEmpty(), onClick = { expanded = true }) { Text(value ?: "—", maxLines = 1) }
+        DropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
+            options.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { expanded = false; onSelect(option) }) }
         }
     }
 }
 
 @Composable
-private fun PressButton(entity: Entity, session: ControlSession?, live: Entity?, ready: Boolean) {
+private fun SelectControl(entity: Entity, live: Entity?, send: Sender) =
+    OptionDropdown(displayValue(entity), (live?.platform as? Platform.Select)?.options.orEmpty(), send.ready) { send(Command.SelectOption(it)) }
+
+@Composable
+private fun ConfirmDialog(title: String, text: String, action: String, onConfirm: () -> Unit, onDismiss: () -> Unit) = AlertDialog(
+    onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) },
+    confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }) { Text(action) } },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+)
+
+@Composable
+private fun PressButton(entity: Entity, send: Sender) {
     // Configuration and diagnostic buttons include restart and factory reset; confirm those.
     val confirm = entity.category != EntityCategory.NONE
     var asking by remember(entity.stableId) { mutableStateOf(false) }
-    fun press() { if (live != null) session?.send(live, Command.Press) }
-    FilledTonalButton(enabled = ready, onClick = { if (confirm) asking = true else press() }) { Text("Press") }
-    if (asking) AlertDialog(
-        onDismissRequest = { asking = false },
-        title = { Text("Press ${entity.name}?") },
-        text = { Text("This runs the action on the device.") },
-        confirmButton = { TextButton(onClick = { asking = false; press() }) { Text("Press") } },
-        dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
-    )
+    FilledTonalButton(enabled = send.ready, onClick = { if (confirm) asking = true else send(Command.Press) }) { Text("Press") }
+    if (asking) ConfirmDialog("Press ${entity.name}?", "This runs the action on the device.", "Press", { send(Command.Press) }, { asking = false })
 }
 
 @Composable
-private fun NumberControl(entity: Entity, session: ControlSession?, live: Entity?, ready: Boolean) {
+private fun PositionButtons(supportsStop: Boolean, send: Sender) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        FilledTonalIconButton(enabled = send.ready, onClick = { send(Command.Open) }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Open") }
+        if (supportsStop) FilledTonalIconButton(enabled = send.ready, onClick = { send(Command.Stop) }) { Icon(Icons.Default.Stop, contentDescription = "Stop") }
+        FilledTonalIconButton(enabled = send.ready, onClick = { send(Command.Close) }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close") }
+    }
+}
+
+@Composable
+private fun LockButtons(entity: Entity, p: Platform.Lock, send: Sender, includeOpen: Boolean) {
+    val status = (entity.state as? EntityState.Lock)?.status
+    // Unlocking and opening reduce physical security; always confirm and ask for a code when the lock requires one.
+    var pending by remember(entity.stableId) { mutableStateOf<LockAction?>(null) }
+    fun request(action: LockAction) { if (action == LockAction.LOCK && !p.requiresCode) send(Command.Lock(action)) else pending = action }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (status == LockStatus.LOCKED || status == LockStatus.LOCKING) FilledTonalButton(enabled = send.ready, onClick = { request(LockAction.UNLOCK) }) { Text("Unlock") }
+        else FilledTonalButton(enabled = send.ready, onClick = { request(LockAction.LOCK) }) { Text("Lock") }
+        if (includeOpen && p.supportsOpen) OutlinedButton(enabled = send.ready, onClick = { request(LockAction.OPEN) }) { Text("Open") }
+    }
+    pending?.let { action ->
+        var code by remember { mutableStateOf("") }
+        val verb = action.name.lowercase().replaceFirstChar { it.uppercase() }
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text("$verb ${entity.name}?") },
+            text = {
+                if (p.requiresCode) OutlinedTextField(code, { code = it }, label = { Text("Code") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = if (p.codeFormat.isEmpty() || p.codeFormat.all { it.isDigit() || it in "^$[]*+{}\\d" }) KeyboardType.NumberPassword else KeyboardType.Password))
+                else Text("This changes the lock on the device.")
+            },
+            confirmButton = { TextButton(enabled = !p.requiresCode || code.isNotEmpty(), onClick = { pending = null; send(Command.Lock(action, code.ifEmpty { null })) }) { Text(verb) } },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun LightControls(entity: Entity, p: Platform.Light, send: Sender) {
+    val s = entity.state as? EntityState.Light
+    if (p.supportsBrightness && s?.brightness != null) { Caption("Brightness"); BrightnessSlider(entity, send) }
+    if (p.supportsRgb) {
+        var hue by remember(entity.stableId, s?.rgb) { mutableFloatStateOf(s?.rgb?.let(::hueOf) ?: 0f) }
+        val c = rgbForHue(hue)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Caption("Colour")
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.size(16.dp).background(Color(c.red, c.green, c.blue), CircleShape))
+        }
+        Slider(value = hue, valueRange = 0f..360f, enabled = send.ready, onValueChange = { hue = it }, onValueChangeFinished = { send(Command.SetRgb(rgbForHue(hue))) },
+            colors = SliderDefaults.colors(thumbColor = Color(c.red, c.green, c.blue)), modifier = Modifier.fillMaxWidth())
+    }
+    if (p.supportsColorTemperature) {
+        val min = p.minMireds!!; val max = p.maxMireds!!
+        var mireds by remember(entity.stableId, s?.mireds) { mutableFloatStateOf((s?.mireds ?: (min + max) / 2).coerceIn(min, max)) }
+        Caption("Colour temperature · ${miredsToKelvin(mireds)} K")
+        Slider(value = mireds, valueRange = min..max, enabled = send.ready, onValueChange = { mireds = it }, onValueChangeFinished = { send(Command.SetColorTemperature(mireds)) }, modifier = Modifier.fillMaxWidth())
+    }
+    if (p.effects.isNotEmpty()) LabeledRow("Effect") { OptionDropdown(s?.effect ?: "None", listOf("None") + p.effects, send.ready) { send(Command.SetEffect(it)) } }
+}
+
+@Composable
+private fun FanControls(entity: Entity, p: Platform.Fan, send: Sender) {
+    val s = entity.state as? EntityState.Fan
+    if (p.speedCount > 0) {
+        var level by remember(entity.stableId, s?.speedLevel) { mutableFloatStateOf((s?.speedLevel ?: 1).coerceIn(1, p.speedCount).toFloat()) }
+        Caption("Speed · ${level.toInt()} of ${p.speedCount}")
+        if (p.speedCount > 1) Slider(value = level, valueRange = 1f..p.speedCount.toFloat(), steps = (p.speedCount - 2).coerceAtLeast(0), enabled = send.ready,
+            onValueChange = { level = it }, onValueChangeFinished = { send(Command.SetFanSpeed(Math.round(level))) }, modifier = Modifier.fillMaxWidth())
+    }
+    if (p.supportsOscillation) LabeledRow("Oscillation") { Switch(checked = s?.oscillating == true, enabled = send.ready, onCheckedChange = { send(Command.SetOscillation(it)) }) }
+    if (p.supportsDirection) LabeledRow("Reverse direction") { Switch(checked = s?.reverse == true, enabled = send.ready, onCheckedChange = { send(Command.SetDirection(it)) }) }
+    if (p.presets.isNotEmpty()) LabeledRow("Preset") { OptionDropdown(s?.preset, p.presets, send.ready) { send(Command.SetPreset(it)) } }
+}
+
+@Composable
+private fun TemperatureStepper(value: Float?, p: Platform.Climate, enabled: Boolean, onSet: (Float) -> Unit) {
+    val decimals = decimalsForStep(p.step)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(enabled = enabled && value != null && value > p.minTemperature, onClick = { onSet(snapTemperature(value!! - p.step, p)) }) { Icon(Icons.Default.Remove, contentDescription = "Lower") }
+        Text(value?.let { "${formatNumber(it, decimals)} ${p.unit}" } ?: "—", style = MaterialTheme.typography.titleMedium)
+        IconButton(enabled = enabled && value != null && value < p.maxTemperature, onClick = { onSet(snapTemperature(value!! + p.step, p)) }) { Icon(Icons.Default.Add, contentDescription = "Raise") }
+    }
+}
+
+/** Target temperature(s): one stepper, or low and high steppers for two-point devices. */
+@Composable
+private fun ClimateTarget(entity: Entity, p: Platform.Climate, send: Sender) {
+    val s = entity.state as? EntityState.Climate
+    if (!p.twoPoint) TemperatureStepper(s?.target, p, send.ready) { send(Command.SetTargetTemperature(it)) }
+    else {
+        TemperatureStepper(s?.targetLow, p, send.ready) { low -> s?.targetHigh?.let { send(Command.SetTargetRange(low, maxOf(low, it))) } }
+        TemperatureStepper(s?.targetHigh, p, send.ready) { high -> s?.targetLow?.let { send(Command.SetTargetRange(minOf(it, high), high)) } }
+    }
+    s?.mode?.let { Caption(listOfNotNull(it, s.action?.takeIf { p.action }).joinToString(" · ")) }
+}
+
+@Composable
+private fun ClimateControls(entity: Entity, p: Platform.Climate, send: Sender) {
+    val s = entity.state as? EntityState.Climate
+    if (p.modes.isNotEmpty()) LabeledRow("Mode") { OptionDropdown(s?.mode, p.modes, send.ready) { send(Command.SetClimateMode(it)) } }
+    if (!p.twoPoint) LabeledRow("Target") { TemperatureStepper(s?.target, p, send.ready) { send(Command.SetTargetTemperature(it)) } }
+    else {
+        LabeledRow("Low") { TemperatureStepper(s?.targetLow, p, send.ready) { low -> s?.targetHigh?.let { send(Command.SetTargetRange(low, maxOf(low, it))) } } }
+        LabeledRow("High") { TemperatureStepper(s?.targetHigh, p, send.ready) { high -> s?.targetLow?.let { send(Command.SetTargetRange(minOf(it, high), high)) } } }
+    }
+    if (p.fanModes.isNotEmpty()) LabeledRow("Fan") { OptionDropdown(s?.fanMode, p.fanModes, send.ready) { send(Command.SetFanMode(it)) } }
+    if (p.swingModes.isNotEmpty()) LabeledRow("Swing") { OptionDropdown(s?.swingMode, p.swingModes, send.ready) { send(Command.SetSwingMode(it)) } }
+    if (p.presets.isNotEmpty()) LabeledRow("Preset") { OptionDropdown(s?.preset, p.presets, send.ready) { send(Command.SetPreset(it)) } }
+    if (p.action && s?.action != null) LabeledRow("Action") { Text(s.action) }
+    if (p.currentHumidity && s?.currentHumidity != null) LabeledRow("Humidity") { Text("${formatNumber(s.currentHumidity, 0)} %") }
+}
+
+@Composable
+private fun NumberControl(entity: Entity, send: Sender) {
     val p = entity.platform as? Platform.Number ?: return
     val current = (entity.state as? EntityState.Numeric)?.value
-    val usable = ready && p.max > p.min
+    val usable = send.ready && p.max > p.min
     val unit = if (p.unit.isBlank()) "" else " ${p.unit}"
     if (p.mode == NumberMode.BOX || !(p.max > p.min)) {
         var editing by remember(entity.stableId) { mutableStateOf(false) }
         OutlinedButton(enabled = usable, onClick = { editing = true }) { Text(displayValue(entity) ?: "—", maxLines = 1) }
-        if (editing) NumberInputDialog(entity.name, p, current, onDismiss = { editing = false }) { value ->
-            editing = false; if (live != null) session?.send(live, Command.SetNumber(value))
-        }
+        if (editing) NumberInputDialog(entity.name, p, current, onDismiss = { editing = false }) { value -> editing = false; send(Command.SetNumber(value)) }
     } else {
         var slider by remember(entity.stableId, current) { mutableFloatStateOf((current ?: p.min).coerceIn(p.min, p.max)) }
         val intervals = if (p.step > 0f) ((p.max - p.min) / p.step).toInt() else 0
         Text(if (current == null) "—" else formatNumber(snapToStep(slider, p), decimalsForStep(p.step)) + unit, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Slider(
             value = slider, valueRange = p.min..p.max, steps = if (intervals in 2..100) intervals - 1 else 0, enabled = usable,
-            onValueChange = { slider = it },
-            onValueChangeFinished = { if (live != null) session?.send(live, Command.SetNumber(snapToStep(slider, p))) },
+            onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetNumber(snapToStep(slider, p))) },
             modifier = Modifier.fillMaxWidth(),
         )
     }

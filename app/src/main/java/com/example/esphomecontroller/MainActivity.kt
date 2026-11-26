@@ -22,7 +22,8 @@ class MainActivity : ComponentActivity() {
     private var lock: WifiManager.MulticastLock? = null
     private var generation = 0
     private val pending = ArrayDeque<NsdServiceInfo>()
-    private val found = mutableSetOf<String>()
+    /** Live announcements per service name; the same device may be announced on several interfaces. */
+    private val found = mutableMapOf<String, Int>()
     private var resolving = false
     private lateinit var store: HomeStore
 
@@ -62,15 +63,21 @@ class MainActivity : ComponentActivity() {
                 override fun onStopDiscoveryFailed(type: String, error: Int) {}
                 override fun onServiceLost(service: NsdServiceInfo) { runOnUiThread {
                     if (generation == current) {
-                        found.remove(service.serviceName)
-                        pending.removeAll { it.serviceName == service.serviceName }
-                        devices.remove(service.serviceName)
+                        val remaining = (found[service.serviceName] ?: 1) - 1
+                        if (remaining > 0) found[service.serviceName] = remaining
+                        else {
+                            found.remove(service.serviceName)
+                            pending.removeAll { it.serviceName == service.serviceName }
+                            devices.remove(service.serviceName)
+                        }
                     }
                 } }
                 override fun onServiceFound(service: NsdServiceInfo) { runOnUiThread {
-                    if (generation == current && found.add(service.serviceName)) {
-                        pending.addLast(service)
-                        resolveNext(current)
+                    if (generation == current) {
+                        val count = (found[service.serviceName] ?: 0) + 1
+                        found[service.serviceName] = count
+                        // Resolve once per name; duplicate announcements from other interfaces only add a reference.
+                        if (count == 1) { pending.addLast(service); resolveNext(current) }
                     }
                 } }
 
@@ -97,7 +104,7 @@ class MainActivity : ComponentActivity() {
                     if (generation == current) {
                         resolving = false
                         val host = info.host?.hostAddress
-                        if (found.contains(info.serviceName) && host != null) {
+                        if (found.containsKey(info.serviceName) && host != null) {
                             val address = joinAddress(host, info.port)
                             devices[info.serviceName] = address
                             store.applyDiscovered(info.serviceName, address)

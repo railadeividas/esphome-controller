@@ -20,7 +20,15 @@ interface ControlSession : AutoCloseable {
     /** The last command failure; does not by itself mean the connection is down. */
     val lastError: String?
     fun send(entity: Entity, command: Command)
+    /** Recent device log lines, newest last; kept in memory only and only after [subscribeLogs]. */
+    val logs: List<String>
+    /** Starts receiving device logs on this connection. Logs may contain network details; never persist them. */
+    fun subscribeLogs()
 }
+
+const val MAX_LOG_LINES = 300
+
+fun appendLog(logs: List<String>, line: String): List<String> = (logs + line).takeLast(MAX_LOG_LINES)
 
 val ControlSession?.isConnected: Boolean get() = this?.connection is ConnectionState.Connected
 
@@ -30,6 +38,8 @@ class DeviceSession(private val host: String, private val port: Int, private val
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override var details by mutableStateOf<DeviceDetails?>(null); private set
     override var lastError by mutableStateOf<String?>(null); private set
+    override var logs by mutableStateOf<List<String>>(emptyList()); private set
+    @Volatile private var logsWanted = false
     private val ui = Handler(Looper.getMainLooper())
     /** Serialises writes (commands and keepalive pings) off the main thread. */
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "esphome-writer") }
@@ -71,6 +81,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
                     // Subscribe only after the entity list so that no initial state arrives before its entity.
                     NativeEvent.EntitiesDone -> send(MessageType.SUBSCRIBE_STATES_REQUEST, byteArrayOf())
                     is NativeEvent.StateChanged -> publish { entities = applyState(entities, event) }
+                    is NativeEvent.Log -> if (logsWanted) publish { logs = appendLog(logs, event.text) }
                     NativeEvent.Ignored -> Unit
                 }
             }
@@ -105,6 +116,14 @@ class DeviceSession(private val host: String, private val port: Int, private val
                 catch (e: Exception) { publish { lastError = "Command failed: ${e.message ?: e.javaClass.simpleName}" } }
             }
         } catch (_: java.util.concurrent.RejectedExecutionException) { lastError = "Command failed: not connected" }
+    }
+
+    override fun subscribeLogs() {
+        if (logsWanted) return
+        logsWanted = true
+        try {
+            worker.execute { try { subscribeLogsFrame().let { send(it.type, it.payload) } } catch (e: Exception) { logsWanted = false; publish { lastError = "Could not subscribe to logs: ${e.message}" } } }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { logsWanted = false }
     }
 
     override fun close() {

@@ -1,6 +1,9 @@
 package com.example.esphomecontroller
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -150,6 +153,8 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
 @Composable
 fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: HomeStore.Device, onBack: () -> Unit, onEdit: () -> Unit) {
     val session = manager.sessions[device.id]
+    var showLogs by remember(device.id) { mutableStateOf(false) }
+    if (showLogs) { DeviceLogs(device, session, onBack = { showLogs = false }); return }
     val live = session?.entities.orEmpty()
     val entities = manager.entities(store.home.id, device.id)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
@@ -157,6 +162,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹ Devices") }
                 Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showLogs = true }) { Text("Logs") }
                 TextButton(onClick = onEdit) { Text("Edit") }
             }
             Text(device.name, style = MaterialTheme.typography.headlineSmall)
@@ -173,6 +179,27 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
         entitySection("Controls and sensors", entities.filter { it.category == EntityCategory.NONE }, session, live)
         entitySection("Configuration", entities.filter { it.category == EntityCategory.CONFIG }, session, live)
         entitySection("Diagnostic", entities.filter { it.category == EntityCategory.DIAGNOSTIC }, session, live)
+    }
+}
+
+/** Live device logs for the current connection; kept in memory only, never saved or shared. */
+@Composable
+private fun DeviceLogs(device: HomeStore.Device, session: ControlSession?, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    // Subscribing is per connection, so subscribe again after a reconnect.
+    LaunchedEffect(session, session.isConnected) { if (session.isConnected) session?.subscribeLogs() }
+    val logs = session?.logs.orEmpty()
+    val listState = rememberLazyListState()
+    LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.scrollToItem(logs.lastIndex) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onBack) { Text("‹ ${device.name}") }
+    }
+    Text("Device logs", style = MaterialTheme.typography.titleLarge)
+    Text("Shown while this page is open and kept only in memory. Logs can include network details; take care when sharing screenshots.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (!session.isConnected) Text(connectionSummary(session, null), style = MaterialTheme.typography.bodySmall)
+    else if (logs.isEmpty()) Text("Waiting for log messages…", style = MaterialTheme.typography.bodySmall)
+    LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(2.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+        items(logs.size) { i -> Text(logs[i], style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
     }
 }
 
