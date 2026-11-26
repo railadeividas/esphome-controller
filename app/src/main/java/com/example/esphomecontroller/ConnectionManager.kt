@@ -5,7 +5,10 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.SystemClock
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +35,9 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     /** Problems that need the user (missing key, bad address); not retried until settings change. */
     val setupErrors = mutableStateMapOf<String, String>()
     private val cache = mutableStateMapOf<String, List<Entity>>()
+    /** Incremented when a device that follows discovery cannot be reached, so the UI can scan for its new address. */
+    var discoveryRequests by mutableIntStateOf(0); private set
+    private var lastDiscoveryRequest = 0L
 
     private data class Target(val homeId: String, val device: HomeStore.Device)
     private val targets = mutableMapOf<String, Target>()
@@ -120,6 +126,9 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
                 else -> Unit
             }
             if (id in setupErrors || now < (nextAttempt[id] ?: 0)) continue
+            if (session?.connection is ConnectionState.Failed && target.device.followDiscovery && now - lastDiscoveryRequest > 60_000L) {
+                lastDiscoveryRequest = now; discoveryRequests++
+            }
             session?.close(); sessions.remove(id)
             val replacement = when (val result = createSession(target.device)) {
                 is SessionResult.Ready -> result.session

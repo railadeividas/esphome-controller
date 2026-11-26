@@ -104,22 +104,28 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
 }
 
 @Composable
-fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, status: String, refresh: () -> Unit, onSetup: (HomeStore.Device) -> Unit) {
+fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (HomeStore.Device) -> Unit) {
     val home = store.home
-    var searches by remember { mutableIntStateOf(0) }
-    // Explain likely causes only after discovery has had time to find something.
-    var waitedLong by remember(searches) { mutableStateOf(false) }
-    LaunchedEffect(searches) { kotlinx.coroutines.delay(10_000); waitedLong = true }
+    // Like Bluetooth settings: opening the page starts a scan.
+    LaunchedEffect(Unit) { if (!scan.scanning) scan.start() }
+    val available = discovered.values.filterNot { d -> home.devices.any { it.id == d.serviceName } }.sortedBy { it.displayName.lowercase() }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("Choose a device for ${home.name}", style = MaterialTheme.typography.bodySmall) }
-        TextButton(onClick = { refresh(); searches++ }) { Text("Refresh") }
+        if (scan.scanning) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            TextButton(onClick = scan.stop) { Text("Stop") }
+        } else TextButton(onClick = scan.start) { Text("Refresh") }
     }
-    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    val available = discovered.values.filterNot { d -> home.devices.any { it.id == d.serviceName } }.sortedBy { it.displayName.lowercase() }
+    val statusText = when {
+        scan.scanning -> "Searching for devices…"
+        scan.error != null -> scan.error
+        scan.finished -> when (available.size) { 0 -> "Search finished. No new devices found."; 1 -> "Search finished. Found 1 new device."; else -> "Search finished. Found ${available.size} new devices." }
+        else -> "Tap Refresh to search for devices."
+    }
+    Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (!scan.scanning && scan.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        if (available.isEmpty()) item {
-            if (!waitedLong) Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text("Looking for ESPHome devices…") }
-            else Card(Modifier.fillMaxWidth()) {
+        if (available.isEmpty() && !scan.scanning && scan.finished) item {
+            Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("No new devices found", style = MaterialTheme.typography.titleSmall)
                     Text("• The phone must be on the same Wi-Fi network as the device.", style = MaterialTheme.typography.bodySmall)

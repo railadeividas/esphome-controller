@@ -24,7 +24,7 @@ import androidx.lifecycle.ViewModelProvider
 private enum class Page { HOME, DEVICES, DISCOVER, SETTINGS }
 
 @Composable
-fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, status: String, refresh: () -> Unit) {
+fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
     val activity = LocalContext.current as ComponentActivity
     val manager = remember(activity) { ViewModelProvider(activity)[ConnectionManager::class.java] }
     var page by remember { mutableStateOf(Page.HOME) }
@@ -44,6 +44,8 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, stat
         onDispose { activity.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(home, active) { manager.sync(home, active) }
+    // An unreachable device may have a new address; a short scan lets it follow.
+    LaunchedEffect(manager.discoveryRequests) { if (manager.discoveryRequests > 0) scan.background() }
 
     val dark = when (store.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
     val view = LocalView.current
@@ -68,7 +70,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, stat
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
                         Page.HOME -> DashboardScreen(store, manager, onManageHomes = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
-                        Page.DISCOVER -> DiscoverScreen(store, discovered, status, refresh, onSetup = { edit(it, true) })
+                        Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = home.devices.firstOrNull { it.id == selectedDevice }
                             if (device == null) DeviceListScreen(store, manager, onOpen = { selectedDevice = it })

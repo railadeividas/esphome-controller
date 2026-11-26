@@ -49,3 +49,15 @@ fun recommendedMode(device: DiscoveredDevice?): String? = when (device?.encrypti
     EncryptionAdvert.AVAILABLE, EncryptionAdvert.NONE -> "plain"
     else -> null
 }
+
+/** Discovery scan state and actions for the UI. */
+class ScanControls(
+    val scanning: Boolean,
+    /** At least one scan has finished since the app started. */
+    val finished: Boolean,
+    val error: String?,
+    val start: () -> Unit,
+    val stop: () -> Unit,
+    /** A short scan to refresh saved devices' addresses; ignored while a scan is running. */
+    val background: () -> Unit,
+)
