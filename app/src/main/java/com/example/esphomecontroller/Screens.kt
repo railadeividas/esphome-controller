@@ -3,6 +3,7 @@ package com.example.esphomecontroller
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -188,13 +189,19 @@ private fun DeviceLogs(device: HomeStore.Device, session: ControlSession?, onBac
     BackHandler(onBack = onBack)
     // Subscribing is per connection, so subscribe again after a reconnect.
     LaunchedEffect(session, session.isConnected) { if (session.isConnected) session?.subscribeLogs() }
-    val logs = session?.logs.orEmpty()
+    var showStates by rememberSaveable { mutableStateOf(true) }
+    val logs = session?.logs.orEmpty().let { all -> if (showStates) all else all.filterNot { it.startsWith(STATE_LOG_PREFIX) } }
     val listState = rememberLazyListState()
     LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.scrollToItem(logs.lastIndex) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack) { Text("‹ ${device.name}") }
     }
-    Text("Device logs", style = MaterialTheme.typography.titleLarge)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Device logs", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+        Text("State updates", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = showStates, onCheckedChange = { showStates = it })
+    }
     Text("Shown while this page is open and kept only in memory. Logs can include network details; take care when sharing screenshots.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (!session.isConnected) Text(connectionSummary(session, null), style = MaterialTheme.typography.bodySmall)
     else if (logs.isEmpty()) Text("Waiting for log messages…", style = MaterialTheme.typography.bodySmall)

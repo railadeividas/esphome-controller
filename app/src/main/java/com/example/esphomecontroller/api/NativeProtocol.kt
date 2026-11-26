@@ -323,5 +323,9 @@ private fun climateCommand(entity: Entity, p: Platform.Climate, command: Command
     return ApiFrame(MessageType.CLIMATE_COMMAND, b.build().toByteArray())
 }
 
-fun subscribeLogsFrame(level: Int = 5): ApiFrame =
+/**
+ * Requests logs up to [level]. The default (VERY_VERBOSE) forwards everything the device's own logger
+ * level emits, matching the web UI; sensor and text-sensor state messages are logged at VERBOSE.
+ */
+fun subscribeLogsFrame(level: Int = Api.LogLevel.LOG_LEVEL_VERY_VERBOSE_VALUE): ApiFrame =
     ApiFrame(MessageType.SUBSCRIBE_LOGS_REQUEST, Api.SubscribeLogsRequest.newBuilder().setLevelValue(level).build().toByteArray())

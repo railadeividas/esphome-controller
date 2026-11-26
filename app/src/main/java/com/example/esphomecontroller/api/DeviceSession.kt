@@ -30,6 +30,11 @@ const val MAX_LOG_LINES = 300
 
 fun appendLog(logs: List<String>, line: String): List<String> = (logs + line).takeLast(MAX_LOG_LINES)
 
+const val STATE_LOG_PREFIX = "[state] "
+
+/** A log-view line for a state update, like the web UI's live state stream; devices do not log these at DEBUG. */
+fun stateLogLine(entity: Entity): String = "$STATE_LOG_PREFIX${entity.name}: ${displayValue(entity) ?: "unknown"}"
+
 val ControlSession?.isConnected: Boolean get() = this?.connection is ConnectionState.Connected
 
 /** Native API session over plaintext or Noise framing. Encryption is never downgraded. */
@@ -80,7 +85,10 @@ class DeviceSession(private val host: String, private val port: Int, private val
                     is NativeEvent.EntityListed -> publish { entities = entities.filterNot { sameEntity(it, event.entity) } + event.entity }
                     // Subscribe only after the entity list so that no initial state arrives before its entity.
                     NativeEvent.EntitiesDone -> send(MessageType.SUBSCRIBE_STATES_REQUEST, byteArrayOf())
-                    is NativeEvent.StateChanged -> publish { entities = applyState(entities, event) }
+                    is NativeEvent.StateChanged -> publish {
+                        entities = applyState(entities, event)
+                        if (logsWanted) entities.firstOrNull { it.webId == null && it.key == event.key && it.deviceId == event.deviceId }?.let { logs = appendLog(logs, stateLogLine(it)) }
+                    }
                     is NativeEvent.Log -> if (logsWanted) publish { logs = appendLog(logs, event.text) }
                     NativeEvent.Ignored -> Unit
                 }

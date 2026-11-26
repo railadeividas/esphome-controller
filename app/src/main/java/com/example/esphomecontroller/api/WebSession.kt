@@ -67,6 +67,7 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
             val platform = if (decoded.needsDetail) old?.platform?.takeIf { it::class == decoded.platform::class } ?: decoded.platform else decoded.platform
             val entity = Entity(old?.key ?: ++nextKey, 0, decoded.name, platform, webId = id, state = decoded.state)
             entities = if (old == null) entities + entity else entities.map { if (it.webId == id) entity else it }
+            if (logsWanted && entity.state != null) logs = appendLog(logs, stateLogLine(entity))
         }
         if (decoded.needsDetail && id !in detailsKnown && pendingDetails.add(id)) fetchDetail(id)
     }

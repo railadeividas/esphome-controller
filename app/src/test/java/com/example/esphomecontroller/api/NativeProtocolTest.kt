@@ -189,8 +189,10 @@ class NativeProtocolTest {
     @Test fun logsAreDecodedWithoutColourCodesAndBounded() {
         val log = decodeNativeFrame(frame(29, Api.SubscribeLogsResponse.newBuilder().setLevelValue(3).setMessage(com.google.protobuf.ByteString.copyFromUtf8("\u001B[0;32m[I][app:100]: Running\u001B[0m")).build()))
         assertEquals(NativeEvent.Log(3, "[I][app:100]: Running"), log)
-        assertEquals(28, subscribeLogsFrame().type)
+        subscribeLogsFrame().let { assertEquals(28, it.type); assertEquals(Api.LogLevel.LOG_LEVEL_VERY_VERBOSE, Api.SubscribeLogsRequest.parseFrom(it.payload).level) }
         val lines = (1..MAX_LOG_LINES + 5).fold(emptyList<String>()) { acc, i -> appendLog(acc, "line $i") }
         assertEquals(MAX_LOG_LINES, lines.size); assertEquals("line ${MAX_LOG_LINES + 5}", lines.last())
+        assertEquals("[state] Sleep timer remaining: Disabled", stateLogLine(Entity(1, 0, "Sleep timer remaining", Platform.TextSensor, state = EntityState.Text("Disabled"))))
+        assertEquals("[state] Temp: unknown", stateLogLine(Entity(2, 0, "Temp", Platform.Sensor(), state = EntityState.Missing)))
     }
 }
