@@ -209,8 +209,6 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleLarge)
                         ConnectionChip(connectionSummary(session, setupError, manager.lastSeen(device.id)), session.isConnected, setupError != null)
-                        val hardware = listOfNotNull(details?.model?.takeIf { it.isNotBlank() }, details?.esphomeVersion?.takeIf { it.isNotBlank() }?.let { "ESPHome $it" })
-                        if (hardware.isNotEmpty()) Text(hardware.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
