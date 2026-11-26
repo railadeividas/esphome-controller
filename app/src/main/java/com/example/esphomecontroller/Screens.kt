@@ -42,9 +42,9 @@ fun connectionSummary(session: ControlSession?, setupError: String?, lastSeen: L
     is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, now)}" } ?: "")
 }
 
-/** "Home · Area", leaving out whichever is unknown; null when neither is. */
-fun placeLine(homeName: String?, area: String?): String? =
-    listOfNotNull(homeName?.takeIf { it.isNotBlank() }, area?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+/** "Location · Area", leaving out whichever is unknown; null when neither is. */
+fun placeLine(locationName: String?, area: String?): String? =
+    listOfNotNull(locationName?.takeIf { it.isNotBlank() }, area?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
 
 fun deviceCount(n: Int) = if (n == 1) "1 device" else "$n devices"
 
@@ -69,7 +69,7 @@ private fun connectionDetail(session: ControlSession?, setupError: String?, last
     is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, System.currentTimeMillis())}" } ?: "") + " · ${c.reason}"
 }
 
-private fun securityLabel(device: HomeStore.Device): String = when (device.mode) {
+private fun securityLabel(device: LocationStore.Device): String = when (device.mode) {
     "plain" -> "Unencrypted"; "encrypted" -> "Encrypted"; "web" -> "HTTP, no login"; "web_auth" -> "HTTP with login"; else -> "Not configured"
 }
 
@@ -79,7 +79,7 @@ fun StatusDot(connected: Boolean) =
 
 /** Connection and firmware information shared by the info dialog and the device page. */
 @Composable
-fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails? = session?.details) {
+fun DeviceInfoLines(device: LocationStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails? = session?.details) {
     Text("Address: ${device.address}")
     Text("Connection: ${connectionDetail(session, setupError)}")
     Text("Interface: ${if (device.isWeb) "Web server" else "Native API"}")
@@ -92,11 +92,11 @@ fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupErr
 }
 
 @Composable
-fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (HomeStore.Device) -> Unit) {
-    val home = store.home
+fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (LocationStore.Device) -> Unit) {
+    val location = store.location
     val available = discovered.values.filterNot { d -> store.contains(d.serviceName) }.sortedBy { it.displayName.lowercase() }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("New devices are added to ${home.name}; you can change this during setup.", style = MaterialTheme.typography.bodySmall) }
+        Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("New devices are added to ${location.name}; you can change this during setup.", style = MaterialTheme.typography.bodySmall) }
         if (scan.scanning) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             TextButton(onClick = scan.stop) { Text("Stop") }
@@ -120,7 +120,7 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
             }
         }
         items(available, key = { it.serviceName }) { d ->
-            Card(onClick = { onSetup(HomeStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+            Card(onClick = { onSetup(LocationStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(d.displayName, style = MaterialTheme.typography.titleMedium)
@@ -133,7 +133,7 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
                 }
             }
         }
-        item { OutlinedButton(onClick = { onSetup(HomeStore.Device("manual:${UUID.randomUUID()}", "", "")) }) { Text("Add a device by address") } }
+        item { OutlinedButton(onClick = { onSetup(LocationStore.Device("manual:${UUID.randomUUID()}", "", "")) }) { Text("Add a device by address") } }
     }
 }
 
@@ -153,8 +153,8 @@ private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp
 }
 
 @Composable
-fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
-    val home = store.home
+fun DeviceListScreen(store: LocationStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
+    val location = store.location
     Text("Devices", style = MaterialTheme.typography.titleLarge)
     Text(deviceCount(store.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (store.devices.isEmpty()) Text("No devices yet. Add one from Discover.")
@@ -167,7 +167,7 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        placeLine(store.homeName(d.homeId), manager.details(d.id)?.area)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        placeLine(store.locationName(d.locationId), manager.details(d.id)?.area)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -178,7 +178,7 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
 }
 
 @Composable
-fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: HomeStore.Device, onBack: () -> Unit, onEdit: () -> Unit) {
+fun DeviceDetailScreen(store: LocationStore, manager: ConnectionManager, device: LocationStore.Device, onBack: () -> Unit, onEdit: () -> Unit) {
     val session = manager.sessions[device.id]
     var showLogs by remember(device.id) { mutableStateOf(false) }
     var infoOpen by rememberSaveable(device.id) { mutableStateOf(false) }
@@ -203,7 +203,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleLarge)
-                        placeLine(store.homeName(device.homeId), details?.area)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        placeLine(store.locationName(device.locationId), details?.area)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, setupError, manager.lastSeen(device.id)), style = MaterialTheme.typography.bodyMedium,
                             color = if (setupError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -234,7 +234,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
 }
 
 /** Static device information: connection settings and what the firmware reports, no live status. */
-private fun deviceFacts(device: HomeStore.Device, details: DeviceDetails?): List<Pair<String, String>> =
+private fun deviceFacts(device: LocationStore.Device, details: DeviceDetails?): List<Pair<String, String>> =
     listOf(
         "Address" to device.address,
         "Interface" to if (device.isWeb) "Web server" else "Native API",
@@ -244,7 +244,7 @@ private fun deviceFacts(device: HomeStore.Device, details: DeviceDetails?): List
 
 /** Live device logs for the current connection; kept in memory only, never saved or shared. */
 @Composable
-private fun DeviceLogs(device: HomeStore.Device, session: ControlSession?, onBack: () -> Unit) {
+private fun DeviceLogs(device: LocationStore.Device, session: ControlSession?, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     // Subscribing is per connection, so subscribe again after a reconnect.
     LaunchedEffect(session, session.isConnected) { if (session.isConnected) session?.subscribeLogs() }
@@ -286,19 +286,19 @@ private fun LazyListScope.entitySection(title: String, entities: List<Entity>, s
 }
 
 @Composable
-fun SettingsScreen(store: HomeStore) {
-    var newHome by remember { mutableStateOf("") }
-    Text("Homes", style = MaterialTheme.typography.titleLarge)
+fun SettingsScreen(store: LocationStore) {
+    var newLocation by remember { mutableStateOf("") }
+    Text("Locations", style = MaterialTheme.typography.titleLarge)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        items(store.homes, key = { it.id }) { h ->
+        items(store.locations, key = { it.id }) { h ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { store.select(h.id) }) { Text(if (h.id == store.selected) "✓ ${h.name}" else h.name) }
-                if (store.homes.size > 1) TextButton(onClick = { store.deleteHome(h.id) }) { Text("Delete") }
+                if (store.locations.size > 1) TextButton(onClick = { store.deleteLocation(h.id) }) { Text("Delete") }
             }
         }
         item {
-            OutlinedTextField(newHome, { newHome = it }, label = { Text("New home name") }, singleLine = true)
-            Button(enabled = newHome.isNotBlank(), onClick = { store.addHome(newHome); newHome = "" }) { Text("Create home") }
+            OutlinedTextField(newLocation, { newLocation = it }, label = { Text("New location name") }, singleLine = true)
+            Button(enabled = newLocation.isNotBlank(), onClick = { store.addLocation(newLocation); newLocation = "" }) { Text("Create location") }
         }
         item {
             Spacer(Modifier.height(20.dp))

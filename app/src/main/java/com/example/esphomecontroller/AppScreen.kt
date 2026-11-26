@@ -23,17 +23,17 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.flow.collectLatest
 
-private enum class Page { HOME, DEVICES, DISCOVER, SETTINGS }
+private enum class Page { DASHBOARD, DEVICES, DISCOVER, SETTINGS }
 
 @Composable
-fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
+fun AppScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
     val activity = LocalContext.current as ComponentActivity
     val manager = remember(activity) { ViewModelProvider(activity)[ConnectionManager::class.java] }
-    var page by remember { mutableStateOf(Page.HOME) }
-    val home = store.home
-    var selectedDevice by remember(home.id) { mutableStateOf<String?>(null) }
+    var page by remember { mutableStateOf(Page.DASHBOARD) }
+    val location = store.location
+    var selectedDevice by remember(location.id) { mutableStateOf<String?>(null) }
     var details by remember { mutableStateOf<String?>(null) }
-    var editing by remember { mutableStateOf<HomeStore.Device?>(null) }
+    var editing by remember { mutableStateOf<LocationStore.Device?>(null) }
     var isNew by remember { mutableStateOf(false) }
     var removeId by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled = page == Page.DEVICES && selectedDevice != null) { selectedDevice = null }
@@ -55,7 +55,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
     val colors = if (dark) darkColorScheme(primary = Color(0xFFCCBEFF), onPrimary = Color(0xFF302269), secondary = Color(0xFFCCC2DF), background = Color(0xFF15141B), surface = Color(0xFF24232C), surfaceVariant = Color(0xFF49454F))
         else lightColorScheme(primary = Color(0xFF5545A0), secondary = Color(0xFF65558F), background = Color(0xFFF2F1F7), surface = Color.White, surfaceVariant = Color(0xFFE9E7F0))
 
-    fun edit(device: HomeStore.Device, new: Boolean) { editing = device; isNew = new }
+    fun edit(device: LocationStore.Device, new: Boolean) { editing = device; isNew = new }
 
     // Command failures appear once each as a snackbar with Retry.
     val snackbar = remember { SnackbarHostState() }
@@ -75,15 +75,15 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
                 Spacer(Modifier.height(6.dp))
                 Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val setup = editing
-                    if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, store.homes.map { it.id to it.name }, defaultHome = setup.homeId ?: if (isNew) store.selected else null, onDismiss = { editing = null }, onSave = { updated ->
+                    if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, store.locations.map { it.id to it.name }, defaultLocation = setup.locationId ?: if (isNew) store.selected else null, onDismiss = { editing = null }, onSave = { updated ->
                         // A different interface yields different entity identities; drop the old cached ones.
                         if (setup.mode != updated.mode && !(setup.mode == null && updated.mode == "encrypted")) manager.forget(setup.id)
                         store.putDevice(updated); editing = null
                         manager.sync(store.devices, active); manager.reconnect(updated.id)
-                        if (isNew) page = Page.HOME
+                        if (isNew) page = Page.DASHBOARD
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
-                        Page.HOME -> DashboardScreen(store, manager, onManageHomes = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
+                        Page.DASHBOARD -> DashboardScreen(store, manager, onManageLocations = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = store.devices.firstOrNull { it.id == selectedDevice }
@@ -94,7 +94,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
                     }
                 }
                 if (editing == null) NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
-                    listOf(Triple(Page.HOME, "Home", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
+                    listOf(Triple(Page.DASHBOARD, "Dashboard", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
                         NavigationBarItem(selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; page = target }, icon = { Icon(icon, contentDescription = null) }, label = { Text(label) })
                     }
                 }

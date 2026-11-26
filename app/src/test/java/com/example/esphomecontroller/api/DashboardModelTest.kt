@@ -1,6 +1,6 @@
 package com.example.esphomecontroller.api
 
-import com.example.esphomecontroller.HomeStore
+import com.example.esphomecontroller.LocationStore
 import com.example.esphomecontroller.proto.Api
 import com.example.esphomecontroller.relativeTime
 import org.junit.Assert.*
@@ -50,7 +50,7 @@ class DashboardModelTest {
         assertEquals("just now", relativeTime(now - 30_000, now)); assertEquals("5 min ago", relativeTime(now - 5 * 60_000, now))
         assertEquals("3 h ago", relativeTime(now - 3 * 3_600_000, now)); assertEquals("2 d ago", relativeTime(now - 2 * 86_400_000L, now - 0))
         assertEquals("just now", relativeTime(now + 5000, now))
-        assertEquals("dev|switch:0:1", HomeStore.entityKey("dev", Entity(1, 0, "x", Platform.Switch).stableId))
+        assertEquals("dev|switch:0:1", LocationStore.entityKey("dev", Entity(1, 0, "x", Platform.Switch).stableId))
     }
 
     @Test fun failureReasonsHideAddresses() {
@@ -62,8 +62,8 @@ class DashboardModelTest {
     }
 
     @Test fun placeLineJoinsHomeAndArea() {
-        assertEquals("My home · Hallway", com.example.esphomecontroller.placeLine("My home", "Hallway"))
-        assertEquals("My home", com.example.esphomecontroller.placeLine("My home", ""))
+        assertEquals("My location · Hallway", com.example.esphomecontroller.placeLine("My location", "Hallway"))
+        assertEquals("My location", com.example.esphomecontroller.placeLine("My location", ""))
         assertEquals("Hallway", com.example.esphomecontroller.placeLine(null, "Hallway"))
         assertNull(com.example.esphomecontroller.placeLine(null, null))
     }

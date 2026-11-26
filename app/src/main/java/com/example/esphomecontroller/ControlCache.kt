@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Saved controls (entity metadata) and device details per "homeId/deviceId", so offline devices still
+ * Saved controls (entity metadata) and device details per device id, so offline devices still
  * show their controls after the app restarts. States are never written. Stored in no-backup storage.
  */
 class ControlCache(file: File) {

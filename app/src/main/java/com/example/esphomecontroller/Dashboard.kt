@@ -20,26 +20,26 @@ import com.example.esphomecontroller.api.*
 import kotlinx.coroutines.delay
 
 /** One entity on the dashboard together with the device it belongs to. */
-private data class Item(val device: HomeStore.Device, val entity: Entity) {
-    val key get() = HomeStore.entityKey(device.id, entity.stableId)
+private data class Item(val device: LocationStore.Device, val entity: Entity) {
+    val key get() = LocationStore.entityKey(device.id, entity.stableId)
 }
 
 /**
- * The Home tab: optional Favourites, then one collapsible section per device in the home's order.
+ * The Dashboard tab (one location): optional Favourites, then one collapsible section per device in the location's order.
  * Controls are tiles; read-only values are listed compactly. Long-press or tap a name for all controls.
  */
 @Composable
-fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes: () -> Unit, onAdd: () -> Unit, onInfo: (HomeStore.Device) -> Unit, onSetup: (HomeStore.Device) -> Unit) {
-    val home = store.home
-    val layout = home.layout
-    var homesExpanded by remember { mutableStateOf(false) }
-    var editing by remember(home.id) { mutableStateOf(false) }
-    var sheet by remember(home.id) { mutableStateOf<Pair<String, String>?>(null) }
+fun DashboardScreen(store: LocationStore, manager: ConnectionManager, onManageLocations: () -> Unit, onAdd: () -> Unit, onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit) {
+    val location = store.location
+    val layout = location.layout
+    var locationsExpanded by remember { mutableStateOf(false) }
+    var editing by remember(location.id) { mutableStateOf(false) }
+    var sheet by remember(location.id) { mutableStateOf<Pair<String, String>?>(null) }
     // Ticks so that "last seen" times stay current.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(30_000); now = System.currentTimeMillis() } }
 
-    fun entitiesOf(d: HomeStore.Device) = manager.entities(d.id)
+    fun entitiesOf(d: LocationStore.Device) = manager.entities(d.id)
         .filter { store.showAllEntities || it.category == EntityCategory.NONE }
         .map { Item(d, it) }
         .filter { editing || it.key !in layout.hidden }
@@ -48,38 +48,38 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
-            TextButton(onClick = { homesExpanded = true }) { Text("${home.name} ▾", style = MaterialTheme.typography.titleMedium) }
-            DropdownMenu(expanded = homesExpanded, onDismissRequest = { homesExpanded = false }) {
-                store.homes.forEach { h -> DropdownMenuItem(text = { Text(h.name) }, onClick = { store.select(h.id); homesExpanded = false }) }
-                DropdownMenuItem(text = { Text("Manage homes") }, onClick = { homesExpanded = false; onManageHomes() })
+            TextButton(onClick = { locationsExpanded = true }) { Text("${location.name} ▾", style = MaterialTheme.typography.titleMedium) }
+            DropdownMenu(expanded = locationsExpanded, onDismissRequest = { locationsExpanded = false }) {
+                store.locations.forEach { h -> DropdownMenuItem(text = { Text(h.name) }, onClick = { store.select(h.id); locationsExpanded = false }) }
+                DropdownMenuItem(text = { Text("Manage locations") }, onClick = { locationsExpanded = false; onManageLocations() })
             }
         }
         if (!editing) {
-            Text(deviceCount(home.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (home.devices.isNotEmpty()) IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
+            Text(deviceCount(location.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (location.devices.isNotEmpty()) IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
             IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add device") }
         } else Button(onClick = { editing = false }) { Text("Done") }
     }
-    if (editing) Text("Reorder sections with the arrows, ★ pins to Favourites, the eye hides an entity from Home.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (home.devices.isEmpty()) Text("Your home is ready. Add a device to get started.")
+    if (editing) Text("Reorder sections with the arrows, ★ pins to Favourites, the eye hides an entity from the dashboard.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (location.devices.isEmpty()) Text("No devices in this location yet. Add one from Discover, or assign one in its settings.")
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         // Favourites: pinned entities from any device, labelled with their device.
         val favourites = layout.pinned.mapNotNull { key ->
-            home.devices.firstNotNullOfOrNull { d -> entitiesOf(d).firstOrNull { it.key == key } }
+            location.devices.firstNotNullOfOrNull { d -> entitiesOf(d).firstOrNull { it.key == key } }
         }
-        if (favourites.isNotEmpty()) item(key = HomeStore.FAVOURITES) {
+        if (favourites.isNotEmpty()) item(key = LocationStore.FAVOURITES) {
             Section(
-                title = "Favourites", subtitle = null, dot = null, collapsed = HomeStore.FAVOURITES in layout.collapsed,
-                onToggleCollapse = { store.toggleCollapsed(HomeStore.FAVOURITES) },
+                title = "Favourites", subtitle = null, dot = null, collapsed = LocationStore.FAVOURITES in layout.collapsed,
+                onToggleCollapse = { store.toggleCollapsed(LocationStore.FAVOURITES) },
             ) { EntityBlock(favourites, store, manager, ::live, editing, open, showDevice = true) }
         }
-        items(home.devices, key = { it.id }) { d ->
+        items(location.devices, key = { it.id }) { d ->
             val session = manager.sessions[d.id]
             val setupError = manager.setupErrors[d.id]
             val offline = session.isOffline && setupError == null
             val items = entitiesOf(d)
-            val index = home.devices.indexOf(d)
+            val index = location.devices.indexOf(d)
             Section(
                 title = d.name,
                 subtitle = connectionSummary(session, setupError, manager.lastSeen(d.id), now),
@@ -89,7 +89,7 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
                 actions = {
                     if (editing) {
                         IconButton(enabled = index > 0, onClick = { store.moveDevice(d.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up") }
-                        IconButton(enabled = index < home.devices.lastIndex, onClick = { store.moveDevice(d.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down") }
+                        IconButton(enabled = index < location.devices.lastIndex, onClick = { store.moveDevice(d.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down") }
                     } else IconButton(onClick = { onInfo(d) }) { Icon(Icons.Default.Info, contentDescription = "Device information") }
                 },
             ) {
@@ -104,7 +104,7 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
     }
 
     sheet?.let { (deviceId, stableId) ->
-        val device = home.devices.firstOrNull { it.id == deviceId }
+        val device = location.devices.firstOrNull { it.id == deviceId }
         val entity = device?.let { d -> manager.entities(d.id).firstOrNull { it.stableId == stableId } }
         if (device != null && entity != null) EntitySheet(Item(device, entity), manager.sessions[device.id], live(Item(device, entity))) { sheet = null }
     }
@@ -134,8 +134,8 @@ private fun Section(
 
 /** Control tiles in two columns, then read-only values in one compact list card. */
 @Composable
-private fun EntityBlock(items: List<Item>, store: HomeStore, manager: ConnectionManager, live: (Item) -> Entity?, editing: Boolean, open: (Item) -> Unit, showDevice: Boolean) {
-    val layout = store.home.layout
+private fun EntityBlock(items: List<Item>, store: LocationStore, manager: ConnectionManager, live: (Item) -> Entity?, editing: Boolean, open: (Item) -> Unit, showDevice: Boolean) {
+    val layout = store.location.layout
     val controls = items.filterNot { it.entity.platform.isReadOnly }
     val readOnly = items.filter { it.entity.platform.isReadOnly }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -173,8 +173,8 @@ private fun EntityBlock(items: List<Item>, store: HomeStore, manager: Connection
 
 /** Pin and hide buttons shown in edit mode. */
 @Composable
-private fun EditTools(item: Item, store: HomeStore, modifier: Modifier = Modifier) {
-    val layout = store.home.layout
+private fun EditTools(item: Item, store: LocationStore, modifier: Modifier = Modifier) {
+    val layout = store.location.layout
     val pinned = item.key in layout.pinned
     val hidden = item.key in layout.hidden
     Row(modifier) {
@@ -182,12 +182,12 @@ private fun EditTools(item: Item, store: HomeStore, modifier: Modifier = Modifie
             Icon(if (pinned) Icons.Default.Star else Icons.Outlined.StarOutline, contentDescription = if (pinned) "Unpin" else "Pin to Favourites", tint = MaterialTheme.colorScheme.primary)
         }
         IconButton(onClick = { store.toggleHidden(item.key) }) {
-            Icon(if (hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = if (hidden) "Show on Home" else "Hide from Home")
+            Icon(if (hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = if (hidden) "Show on dashboard" else "Hide from dashboard")
         }
     }
 }
 
-/** Full controls for one entity without leaving Home. */
+/** Full controls for one entity without leaving the dashboard. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntitySheet(item: Item, session: ControlSession?, live: Entity?, onDismiss: () -> Unit) {

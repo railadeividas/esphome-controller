@@ -30,7 +30,7 @@ import org.json.JSONObject
 import kotlin.random.Random
 
 /**
- * Owns device sessions for the selected home. Each device connects, fails and retries
+ * Owns device sessions for all of the app's devices. Each device connects, fails and retries
  * independently, so a change to one device never interrupts the others. Lives in a
  * ViewModel so sessions survive activity recreation; entity state is kept in memory only.
  */
@@ -54,7 +54,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     private val lastSeen = mutableMapOf<String, Long>()
     fun lastSeen(deviceId: String): Long? = lastSeen[deviceId]
 
-    private data class Target(val device: HomeStore.Device)
+    private data class Target(val device: LocationStore.Device)
     private val targets = mutableMapOf<String, Target>()
     private val attempts = mutableMapOf<String, Int>()
     private val nextAttempt = mutableMapOf<String, Long>()
@@ -70,8 +70,6 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { retryLoop() }
         viewModelScope.launch {
             saved = withContext(Dispatchers.IO) { disk.load() }
-            // Older versions keyed the cache by "homeId/deviceId"; keys are now the device id.
-            saved = saved.entries.groupBy({ it.key.substringAfter('/') }, { it.value }).mapValues { it.value.first() }
             saved.forEach { (key, entry) ->
                 if (key !in cache && entry.entities.isNotEmpty()) cache[key] = entry.entities
                 entry.details?.let { if (key !in cachedDetails) cachedDetails[key] = it }
@@ -121,7 +119,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     }
 
     /** Reconciles sessions with the app's devices. Only devices whose connection settings changed are restarted. */
-    fun sync(devices: List<HomeStore.Device>, active: Boolean) {
+    fun sync(devices: List<LocationStore.Device>, active: Boolean) {
         val wanted = if (active) devices.associateBy { it.id } else emptyMap()
         for ((id, target) in targets.toList()) {
             val device = wanted[id]
@@ -144,7 +142,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         attempts.remove(id); nextAttempt.remove(id)
     }
 
-    private fun sameConnection(a: HomeStore.Device, b: HomeStore.Device) = a.address == b.address && a.mode == b.mode
+    private fun sameConnection(a: LocationStore.Device, b: LocationStore.Device) = a.address == b.address && a.mode == b.mode
 
     private fun onNetworkAvailable(network: Network) {
         val changed = currentNetwork != null && currentNetwork != network
@@ -195,7 +193,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         data class NeedsSetup(val message: String) : SessionResult
     }
 
-    private fun createSession(device: HomeStore.Device): SessionResult {
+    private fun createSession(device: LocationStore.Device): SessionResult {
         val (host, port) = splitAddress(device.address)
         val endpoint = parseEndpoint(host, port) ?: return SessionResult.NeedsSetup("Check the device address in settings")
         return try {

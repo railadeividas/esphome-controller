@@ -46,15 +46,15 @@ private sealed interface SetupStatus {
  */
 @Composable
 fun DeviceSetupScreen(
-    device: HomeStore.Device,
+    device: LocationStore.Device,
     discovered: DiscoveredDevice?,
     isNew: Boolean,
     secrets: SecretStore,
-    /** (id, name) of every home, for the Home picker. */
-    homes: List<Pair<String, String>>,
-    defaultHome: String?,
+    /** (id, name) of every location, for the Location picker. */
+    locations: List<Pair<String, String>>,
+    defaultLocation: String?,
     onDismiss: () -> Unit,
-    onSave: (HomeStore.Device) -> Unit,
+    onSave: (LocationStore.Device) -> Unit,
     onRemove: (() -> Unit)?,
 ) {
     BackHandler(onBack = onDismiss)
@@ -74,8 +74,8 @@ fun DeviceSetupScreen(
     var username by remember(device.id) { mutableStateOf(webCredentials?.optString("username") ?: "") }
     var password by remember(device.id) { mutableStateOf("") }
     var showAdvanced by remember(device.id) { mutableStateOf(false) }
-    var homeId by remember(device.id) { mutableStateOf(defaultHome?.takeIf { id -> homes.any { it.first == id } }) }
-    var homesExpanded by remember { mutableStateOf(false) }
+    var locationId by remember(device.id) { mutableStateOf(defaultLocation?.takeIf { id -> locations.any { it.first == id } }) }
+    var locationsExpanded by remember { mutableStateOf(false) }
     var status by remember(device.id) { mutableStateOf<SetupStatus>(SetupStatus.None) }
     val busy = status is SetupStatus.Busy
 
@@ -119,7 +119,7 @@ fun DeviceSetupScreen(
                 val data = JSONObject().put("username", username.trim()).put("password", password.ifBlank { webCredentials!!.getString("password") }).toString().toByteArray(Charsets.UTF_8)
                 try { secrets.save("web:${device.id}", data) } finally { data.fill(0) }
             }
-            onSave(device.copy(name = name.trim(), address = joinAddress(e.host, e.port), mode = mode, followDiscovery = followDiscovery && !manual, homeId = homeId))
+            onSave(device.copy(name = name.trim(), address = joinAddress(e.host, e.port), mode = mode, followDiscovery = followDiscovery && !manual, locationId = locationId))
             key = ""; password = ""
         } catch (_: Exception) { status = SetupStatus.Message("Could not store the credentials securely. Try again.", true) }
     }
@@ -183,14 +183,14 @@ fun DeviceSetupScreen(
 
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
-        // A device belongs to the app and is shown on at most one home's dashboard.
+        // A device belongs to the app and is shown on at most one location's dashboard.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Home", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text("Location", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Box {
-                OutlinedButton(onClick = { homesExpanded = true }) { Text((homes.firstOrNull { it.first == homeId }?.second ?: "Not in a home") + " ▾") }
-                DropdownMenu(expanded = homesExpanded, onDismissRequest = { homesExpanded = false }) {
-                    homes.forEach { (id, homeName) -> DropdownMenuItem(text = { Text(homeName) }, onClick = { homeId = id; homesExpanded = false }) }
-                    DropdownMenuItem(text = { Text("Not in a home") }, onClick = { homeId = null; homesExpanded = false })
+                OutlinedButton(onClick = { locationsExpanded = true }) { Text((locations.firstOrNull { it.first == locationId }?.second ?: "No location") + " ▾") }
+                DropdownMenu(expanded = locationsExpanded, onDismissRequest = { locationsExpanded = false }) {
+                    locations.forEach { (id, locationName) -> DropdownMenuItem(text = { Text(locationName) }, onClick = { locationId = id; locationsExpanded = false }) }
+                    DropdownMenuItem(text = { Text("No location") }, onClick = { locationId = null; locationsExpanded = false })
                 }
             }
         }

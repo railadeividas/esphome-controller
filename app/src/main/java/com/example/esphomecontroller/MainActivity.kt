@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
     /** Live announcements per service name; the same device may be announced on several interfaces. */
     private val found = mutableMapOf<String, Int>()
     private var resolving = false
-    private lateinit var store: HomeStore
+    private lateinit var store: LocationStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,9 +53,9 @@ class MainActivity : ComponentActivity() {
         // The system's three-button contrast scrim would otherwise obscure our themed background.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
-        store = HomeStore(getSharedPreferences("homes", Context.MODE_PRIVATE))
+        store = LocationStore(getSharedPreferences("locations", Context.MODE_PRIVATE))
         setContent {
-            HomeScreen(store, devices, ScanControls(scanning && manualScan, scanned, scanError, start = { startScan(MANUAL_SCAN_MS, manual = true) }, stop = ::stopScan, background = ::backgroundScan))
+            AppScreen(store, devices, ScanControls(scanning && manualScan, scanned, scanError, start = { startScan(MANUAL_SCAN_MS, manual = true) }, stop = ::stopScan, background = ::backgroundScan))
         }
     }
 
