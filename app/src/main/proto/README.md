@@ -1,0 +1,1 @@
+ESPHome API definitions vendored from aioesphomeapi commit 7641f122515545c87685cd3c90c44f2a32dfeeba (MIT; see UPSTREAM-LICENSE). Java package options were added and the protobuf type `void` was renamed to `EmptyResponse` because `void` is a Java keyword. These changes do not change field numbers or wire encoding.

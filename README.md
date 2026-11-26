@@ -1,0 +1,25 @@
+# ESPHome Controller
+
+An early Android discovery prototype for ESPHome devices. It browses `_esphomelib._tcp` while the app is in the foreground, resolves devices, and lets you enter a hostname or IP and port manually. Homes, selected home, and assigned devices are stored locally. The Home tab groups controls into two-column tiles and keeps last reported values in memory while the app is running; disconnected controls are disabled. Values are not saved across app restarts. Discover guides device setup, including connection security; saved devices connect automatically while the app is open. Use the Devices tab to browse the selected home’s devices and open a detailed list of available controls, readings and connection information. Use Edit to change device settings; the Home tab also has an Info action. Settings offers System (default), Light, and Dark appearance. Experimental Native API and web-server connections support lights, switches, select controls, sensors, binary sensors and text sensors. The web server must be enabled on the device. Other entity types are not yet supported.
+
+## Build with Docker
+
+Run `./docker/build.sh`. This builds the Android SDK/Gradle image, runs `testDebugUnitTest assembleDebug`, and writes the debug APK to `app/build/outputs/apk/debug/app-debug.apk`. Docker and internet access are required for the first build. The debug signing key is kept in the Gradle cache under /tmp/esphome-gradle-cache; deleting it changes the signing key.
+
+## Try on a phone
+
+Install the debug APK on an Android phone (for example, with `adb install -r app/build/outputs/apk/debug/app-debug.apk`). Connect the phone and an ESPHome device with the native API and mDNS enabled to the same Wi-Fi network, open the app, and look for the device. Use Refresh or enter its address manually if necessary. mDNS normally does not cross subnets without a reflector.
+
+The build and endpoint validation unit tests pass in Docker. Discovery was verified on a physical Android phone, which displayed two ESPHome devices. Broader network and Android-version testing remains necessary. Android 17 local-network permission behavior needs validation before targeting that release. Broader network-change handling and reliable multi-interface deduplication remain future work. Existing devices without a saved encryption key require a one-time setup to choose their connection mode; the app never assumes plaintext.
+
+References: [Android NSD](https://developer.android.com/reference/android/net/nsd/NsdManager), [local network permission](https://developer.android.com/privacy-and-security/local-network-permission), [ESPHome Native API](https://esphome.io/components/api/).
+
+## API client progress
+
+The encrypted client uses Noise NNpsk0 with a key entered per device and encrypted using Android Keystore. The current client requires Android 13 or later for encrypted connections, and implements an initial subset of entity platforms. An encrypted device has connected on a physical phone; broader interoperability and command verification are still needed. Unencrypted connections require explicit selection and a warning; encrypted connections never automatically fall back to plaintext. The Noise library torann 0.3.2 is MIT licensed, recently published, and its authors state it has not been independently audited.
+
+## Connecting through the web server
+
+In device setup or Info → Edit device, choose **Web server · No login** or **Web server · Username and password**. The default web port is 80 and may be changed. Credentials are stored with Android Keystore-backed encryption. ESPHome web connections use HTTP in this build: states and commands are unencrypted, and Basic authentication also sends credentials without transport encryption. Use a trusted local network. Web and Native API settings are separate; the app never automatically falls back between them.
+
+The web client uses the event stream for live state and supports light, switch and select commands. Web server features and entity IDs vary with firmware. Public, Basic and Digest authentication, state decoding and command construction have automated tests; broader testing with real authenticated devices is still needed.
