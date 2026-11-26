@@ -210,13 +210,12 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Icon(Icons.Default.ExpandMore, contentDescription = if (infoOpen) "Hide" else "Show", modifier = Modifier.rotate(if (infoOpen) 180f else 0f))
                 }
                 if (infoOpen) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    deviceFacts(device, session, setupError, details, manager.lastSeen(device.id)).forEach { (label, value) ->
+                    deviceFacts(device, details).forEach { (label, value) ->
                         Row {
                             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(0.4f))
                             Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.weight(0.6f))
                         }
                     }
-                    session?.lastError?.let { Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 }
             }
         }
@@ -227,11 +226,10 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
     }
 }
 
-/** Label/value pairs for the device information grid and dialog. */
-private fun deviceFacts(device: HomeStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails?, lastSeen: Long?): List<Pair<String, String>> =
+/** Static device information: connection settings and what the firmware reports, no live status. */
+private fun deviceFacts(device: HomeStore.Device, details: DeviceDetails?): List<Pair<String, String>> =
     listOf(
         "Address" to device.address,
-        "Connection" to connectionDetail(session, setupError, lastSeen),
         "Interface" to if (device.isWeb) "Web server" else "Native API",
         "Security" to securityLabel(device),
     ) + listOf("Model" to details?.model, "Manufacturer" to details?.manufacturer, "ESPHome" to details?.esphomeVersion, "Project" to details?.project)
