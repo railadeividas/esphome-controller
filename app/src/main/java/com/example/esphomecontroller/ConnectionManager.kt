@@ -130,6 +130,15 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         connectDue()
     }
 
+    /** Pull to refresh: retries the given devices that are not connected right away, skipping the backoff. */
+    fun reconnectNow(deviceIds: Collection<String>) {
+        for (id in deviceIds) {
+            if (id !in targets || sessions[id]?.connection is ConnectionState.Connected) continue
+            sessions.remove(id)?.close(); attempts.remove(id); nextAttempt.remove(id); setupErrors.remove(id)
+        }
+        connectDue()
+    }
+
     /** Forces a fresh connection, for example after a key or password change. */
     fun reconnect(deviceId: String) {
         val target = targets[deviceId] ?: return

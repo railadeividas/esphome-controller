@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.collectLatest
 private enum class Page { DASHBOARD, DEVICES, DISCOVER, SETTINGS }
 
 @Composable
-fun AppScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
+fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
     val activity = LocalContext.current as ComponentActivity
     val manager = remember(activity) { ViewModelProvider(activity)[ConnectionManager::class.java] }
     var page by remember { mutableStateOf(Page.DASHBOARD) }
@@ -60,10 +60,13 @@ fun AppScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, s
     // Command failures appear once each as a snackbar with Retry.
     val snackbar = remember { SnackbarHostState() }
     val reported = remember { mutableSetOf<Long>() }
+    // A dashboard can show errors under its sections instead of as snackbars.
+    val inlineErrors by rememberUpdatedState(page == Page.DASHBOARD && editing == null && !dashboards.selected.settings.snackbarErrors)
     LaunchedEffect(manager) {
         snapshotFlow { manager.sessions.mapNotNull { (id, s) -> s.lastError?.let { id to it } } }.collectLatest { errors ->
             val (deviceId, error) = errors.filter { it.second.serial !in reported }.maxByOrNull { it.second.serial } ?: return@collectLatest
             reported += error.serial
+            if (inlineErrors) return@collectLatest
             if (snackbar.showSnackbar(error.message, actionLabel = "Retry", withDismissAction = true) == SnackbarResult.ActionPerformed) manager.sessions[deviceId]?.retryFailed()
         }
     }
@@ -83,14 +86,14 @@ fun AppScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, s
                         if (isNew) page = Page.DASHBOARD
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
-                        Page.DASHBOARD -> DashboardScreen(store, manager, onManageLocations = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
+                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { page = Page.SETTINGS }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = store.devices.firstOrNull { it.id == selectedDevice }
                             if (device == null) DeviceListScreen(store, manager, onOpen = { selectedDevice = it })
                             else DeviceDetailScreen(store, manager, device, onBack = { selectedDevice = null }, onEdit = { edit(device, false) })
                         }
-                        Page.SETTINGS -> SettingsScreen(store)
+                        Page.SETTINGS -> SettingsScreen(store, dashboards, manager)
                     }
                 }
                 if (editing == null) NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
@@ -114,7 +117,7 @@ fun AppScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, s
             AlertDialog(
                 onDismissRequest = { removeId = null }, title = { Text("Remove device?") }, text = { Text("The device and its saved keys will be removed from the app.") },
                 confirmButton = { TextButton(onClick = {
-                    store.removeDevice(id); if (selectedDevice == id) selectedDevice = null
+                    store.removeDevice(id); dashboards.forgetDevice(id); if (selectedDevice == id) selectedDevice = null
                     manager.forget(id)
                     manager.secrets.remove(id); manager.secrets.remove("web:$id")
                     removeId = null

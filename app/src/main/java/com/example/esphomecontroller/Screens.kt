@@ -286,10 +286,14 @@ private fun LazyListScope.entitySection(title: String, entities: List<Entity>, s
 }
 
 @Composable
-fun SettingsScreen(store: LocationStore) {
+fun SettingsScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager) {
     var newLocation by remember { mutableStateOf("") }
-    Text("Locations", style = MaterialTheme.typography.titleLarge)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item { DashboardsSettings(store, dashboards, manager); Spacer(Modifier.height(20.dp)) }
+        item {
+            Text("Locations", style = MaterialTheme.typography.titleLarge)
+            Text("Locations organise devices. New devices are added to the checked location.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         items(store.locations, key = { it.id }) { h ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { store.select(h.id) }) { Text(if (h.id == store.selected) "✓ ${h.name}" else h.name) }
@@ -299,15 +303,6 @@ fun SettingsScreen(store: LocationStore) {
         item {
             OutlinedTextField(newLocation, { newLocation = it }, label = { Text("New location name") }, singleLine = true)
             Button(enabled = newLocation.isNotBlank(), onClick = { store.addLocation(newLocation); newLocation = "" }) { Text("Create location") }
-        }
-        item {
-            Spacer(Modifier.height(20.dp))
-            Text("Dashboard", style = MaterialTheme.typography.titleLarge)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Show configuration and diagnostic entities", Modifier.weight(1f))
-                Switch(checked = store.showAllEntities, onCheckedChange = store::changeShowAllEntities)
-            }
-            Text("They are always listed on each device's page.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             Spacer(Modifier.height(20.dp))

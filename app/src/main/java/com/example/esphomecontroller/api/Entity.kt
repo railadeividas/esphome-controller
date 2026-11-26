@@ -278,3 +278,11 @@ fun binaryStateText(on: Boolean, deviceClass: String): String {
 
 /** Read-only platforms are listed compactly instead of as control tiles. */
 val Platform.isReadOnly: Boolean get() = this is Platform.Sensor || this == Platform.BinarySensor || this == Platform.TextSensor
+
+/** A readable name for an entity's platform, e.g. "Binary sensor". */
+fun entityLabel(platform: Platform): String = when (platform) {
+    is Platform.Light -> "Light"; Platform.Switch -> "Switch"; Platform.BinarySensor -> "Binary sensor"; Platform.TextSensor -> "Text sensor"
+    Platform.Button -> "Button"; is Platform.Sensor -> "Sensor"; is Platform.Select -> "Select"; is Platform.Number -> "Number"
+    is Platform.Cover -> "Cover"; is Platform.Valve -> "Valve"; is Platform.Fan -> "Fan"; is Platform.Lock -> "Lock"
+    is Platform.Climate -> "Climate"; is Platform.Unsupported -> "${platform.platform} (not supported yet)"
+}

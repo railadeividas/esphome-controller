@@ -2,168 +2,263 @@ package com.example.esphomecontroller
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.StarOutline
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.example.esphomecontroller.api.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-/** One entity on the dashboard together with the device it belongs to. */
-private data class Item(val device: LocationStore.Device, val entity: Entity) {
-    val key get() = LocationStore.entityKey(device.id, entity.stableId)
+/** A dashboard item resolved against the app's devices and the live/cached entities. */
+private data class Resolved(val ref: ItemRef, val device: LocationStore.Device?, val entity: Entity?, val session: ControlSession?, val live: Entity?) {
+    val available get() = device != null && entity != null
 }
 
 /**
- * The Dashboard tab (one location): optional Favourites, then one collapsible section per device in the location's order.
- * Controls are tiles; read-only values are listed compactly. Long-press or tap a name for all controls.
+ * The Dashboard tab: user-created dashboards made of sections (tiles, list, device, heading). Every
+ * presentation feature comes from the dashboard's own [DashboardSettings]; editing happens in place.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(store: LocationStore, manager: ConnectionManager, onManageLocations: () -> Unit, onAdd: () -> Unit, onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit) {
-    val location = store.location
-    val layout = location.layout
-    var locationsExpanded by remember { mutableStateOf(false) }
-    var editing by remember(location.id) { mutableStateOf(false) }
-    var sheet by remember(location.id) { mutableStateOf<Pair<String, String>?>(null) }
-    // Ticks so that "last seen" times stay current.
+fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, onManageDashboards: () -> Unit, onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit) {
+    val board = dashboards.selected
+    val settings = board.settings
+    var menuOpen by remember { mutableStateOf(false) }
+    var editing by remember(board.id) { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    var addingSection by remember(board.id) { mutableStateOf(false) }
+    var editingSection by remember(board.id) { mutableStateOf<Section?>(null) }
+    var picking by remember(board.id) { mutableStateOf<Section?>(null) }
+    var sheet by remember(board.id) { mutableStateOf<ItemRef?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(30_000); now = System.currentTimeMillis() } }
+    val columns = settings.columns.takeIf { it > 0 } ?: if (LocalConfiguration.current.screenWidthDp >= 600) 4 else 2
 
-    fun entitiesOf(d: LocationStore.Device) = manager.entities(d.id)
-        .filter { store.showAllEntities || it.category == EntityCategory.NONE }
-        .map { Item(d, it) }
-        .filter { editing || it.key !in layout.hidden }
-    fun live(item: Item) = manager.sessions[item.device.id]?.entities?.firstOrNull { sameEntity(it, item.entity) }
-    val open: (Item) -> Unit = { sheet = it.device.id to it.entity.stableId }
-
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) {
-            TextButton(onClick = { locationsExpanded = true }) { Text("${location.name} ▾", style = MaterialTheme.typography.titleMedium) }
-            DropdownMenu(expanded = locationsExpanded, onDismissRequest = { locationsExpanded = false }) {
-                store.locations.forEach { h -> DropdownMenuItem(text = { Text(h.name) }, onClick = { store.select(h.id); locationsExpanded = false }) }
-                DropdownMenuItem(text = { Text("Manage locations") }, onClick = { locationsExpanded = false; onManageLocations() })
-            }
-        }
-        if (!editing) {
-            Text(deviceCount(location.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (location.devices.isNotEmpty()) IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add device") }
-        } else Button(onClick = { editing = false }) { Text("Done") }
+    fun resolve(ref: ItemRef): Resolved {
+        val device = store.devices.firstOrNull { it.id == ref.deviceId }
+        val session = manager.sessions[ref.deviceId]
+        val entity = device?.let { manager.entities(it.id).firstOrNull { e -> e.stableId == ref.stableId } }
+        return Resolved(ref, device, entity, session, entity?.let { e -> session?.entities?.firstOrNull { sameEntity(it, e) } })
     }
-    if (editing) Text("Reorder sections with the arrows, ★ pins to Favourites, the eye hides an entity from the dashboard.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (location.devices.isEmpty()) Text("No devices in this location yet. Add one from Discover, or assign one in its settings.")
+    val open: (ItemRef) -> Unit = { if (settings.controlsSheet) sheet = it }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        // Favourites: pinned entities from any device, labelled with their device.
-        val favourites = layout.pinned.mapNotNull { key ->
-            location.devices.firstNotNullOfOrNull { d -> entitiesOf(d).firstOrNull { it.key == key } }
-        }
-        if (favourites.isNotEmpty()) item(key = LocationStore.FAVOURITES) {
-            Section(
-                title = "Favourites", subtitle = null, dot = null, collapsed = LocationStore.FAVOURITES in layout.collapsed,
-                onToggleCollapse = { store.toggleCollapsed(LocationStore.FAVOURITES) },
-            ) { EntityBlock(favourites, store, manager, ::live, editing, open, showDevice = true) }
-        }
-        items(location.devices, key = { it.id }) { d ->
-            val session = manager.sessions[d.id]
-            val setupError = manager.setupErrors[d.id]
-            val offline = session.isOffline && setupError == null
-            val items = entitiesOf(d)
-            val index = location.devices.indexOf(d)
-            Section(
-                title = d.name,
-                subtitle = connectionSummary(session, setupError, manager.lastSeen(d.id), now),
-                dot = session.isConnected,
-                collapsed = d.id in layout.collapsed,
-                onToggleCollapse = { store.toggleCollapsed(d.id) },
-                actions = {
-                    if (editing) {
-                        IconButton(enabled = index > 0, onClick = { store.moveDevice(d.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up") }
-                        IconButton(enabled = index < location.devices.lastIndex, onClick = { store.moveDevice(d.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down") }
-                    } else IconButton(onClick = { onInfo(d) }) { Icon(Icons.Default.Info, contentDescription = "Device information") }
-                },
-            ) {
-                // Offline devices keep their last values visible, dimmed, with controls disabled.
-                Column(Modifier.alpha(if (offline) 0.5f else 1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    EntityBlock(items, store, manager, ::live, editing, open, showDevice = false)
-                    if (items.isEmpty()) Text(if (session.isConnected) "Waiting for device states…" else "—", style = MaterialTheme.typography.bodySmall)
-                }
-                if (setupError != null) TextButton(onClick = { onSetup(d) }) { Text("Fix connection settings") }
-            }
-        }
-    }
-
-    sheet?.let { (deviceId, stableId) ->
-        val device = location.devices.firstOrNull { it.id == deviceId }
-        val entity = device?.let { d -> manager.entities(d.id).firstOrNull { it.stableId == stableId } }
-        if (device != null && entity != null) EntitySheet(Item(device, entity), manager.sessions[device.id], live(Item(device, entity))) { sheet = null }
-    }
-}
-
-/** A dashboard section with a collapsible header. */
-@Composable
-private fun Section(
-    title: String, subtitle: String?, dot: Boolean?, collapsed: Boolean, onToggleCollapse: () -> Unit,
-    actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    CompositionLocalProvider(LocalEntityStyle provides EntityStyle(settings.brightnessPercent, settings.tapToToggle, settings.pendingSpinner)) {
+        // Top bar: dashboard switcher, edit and settings.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (dot != null) { StatusDot(dot); Spacer(Modifier.width(10.dp)) }
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Box(Modifier.weight(1f)) {
+                TextButton(onClick = { menuOpen = true }) { Text("${board.name} ▾", style = MaterialTheme.typography.titleMedium, maxLines = 1) }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    dashboards.dashboards.forEach { d ->
+                        DropdownMenuItem(
+                            text = { Text(d.name) },
+                            leadingIcon = { if (d.id == dashboards.defaultId) Icon(Icons.Default.Star, contentDescription = "Default") },
+                            onClick = { dashboards.select(d.id); menuOpen = false },
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("New dashboard") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { menuOpen = false; creating = true })
+                    DropdownMenuItem(text = { Text("Manage dashboards") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuOpen = false; onManageDashboards() })
+                }
             }
-            actions()
-            IconButton(onClick = onToggleCollapse) {
-                Icon(Icons.Default.ExpandMore, contentDescription = if (collapsed) "Expand" else "Collapse", modifier = Modifier.rotate(if (collapsed) -90f else 0f))
-            }
+            if (editing) {
+                IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Tune, contentDescription = "Dashboard settings") }
+                Button(onClick = { editing = false }) { Text("Done") }
+            } else IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
         }
-        if (!collapsed) content()
-    }
-}
+        if (settings.summaryLine && !editing) Summary(board, store, manager)
 
-/** Control tiles in two columns, then read-only values in one compact list card. */
-@Composable
-private fun EntityBlock(items: List<Item>, store: LocationStore, manager: ConnectionManager, live: (Item) -> Entity?, editing: Boolean, open: (Item) -> Unit, showDevice: Boolean) {
-    val layout = store.location.layout
-    val controls = items.filterNot { it.entity.platform.isReadOnly }
-    val readOnly = items.filter { it.entity.platform.isReadOnly }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        controls.chunked(2).forEach { pair ->
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { item ->
-                    val hidden = item.key in layout.hidden
-                    EntityTile(
-                        item.entity, manager.sessions[item.device.id], live(item),
-                        Modifier.weight(1f).fillMaxHeight().alpha(if (hidden) 0.4f else 1f),
-                        deviceLabel = if (showDevice) item.device.name else null,
-                        onOpen = if (editing) null else { { open(item) } },
-                        overlay = if (!editing) null else { { EditTools(item, store, Modifier.align(Alignment.TopEnd)) } },
+        val list: @Composable () -> Unit = {
+            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+                if (board.sections.isEmpty()) item {
+                    Text(if (editing) "Add a section to start building this dashboard." else "This dashboard is empty. Tap the pencil to add sections.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                items(board.sections, key = { it.id }) { section ->
+                    SectionView(
+                        section, board, store, dashboards, manager, settings, columns, editing, now, ::resolve, open, onInfo, onSetup,
+                        onEdit = { editingSection = section }, onPick = { picking = section },
                     )
                 }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                if (editing) item {
+                    OutlinedButton(onClick = { addingSection = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add section") }
+                }
             }
         }
-        if (readOnly.isNotEmpty()) Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) {
-                readOnly.forEachIndexed { i, item ->
-                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                    Box(Modifier.alpha(if (item.key in layout.hidden) 0.4f else 1f)) {
-                        ReadOnlyRow(
-                            item.entity, deviceLabel = if (showDevice) item.device.name else null,
-                            onOpen = if (editing) null else { { open(item) } },
-                            trailing = if (!editing) null else { { EditTools(item, store) } },
+        if (settings.pullToRefresh && !editing) {
+            val scope = rememberCoroutineScope()
+            var refreshing by remember { mutableStateOf(false) }
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = {
+                refreshing = true; manager.reconnectNow(board.deviceIds)
+                scope.launch { delay(1200); refreshing = false }
+            }) { list() }
+        } else list()
+
+        sheet?.let { ref ->
+            val r = resolve(ref)
+            if (r.available) EntitySheet(r.device!!, r.entity!!, r.session, r.live) { sheet = null }
+        }
+    }
+
+    if (creating) NewDashboardDialog(store, onDismiss = { creating = false }) { name, template ->
+        creating = false
+        dashboards.create(name, template, store, { manager.entities(it) }, { manager.details(it)?.area })
+        editing = template == DashboardTemplate.Empty
+    }
+    if (showSettings) DashboardSettingsSheet(board, dashboards, onDismiss = { showSettings = false })
+    if (addingSection) SectionDialog(null, store, onDismiss = { addingSection = false }) { section ->
+        addingSection = false
+        dashboards.addSection(board.id, section)
+        if (section.type == SectionType.TILES || section.type == SectionType.LIST) picking = section
+    }
+    editingSection?.let { s -> SectionDialog(s, store, onDismiss = { editingSection = null }) { dashboards.updateSection(board.id, it); editingSection = null } }
+    picking?.let { s ->
+        val current = board.sections.firstOrNull { it.id == s.id } ?: s
+        EntityPicker(store, manager, current.items, onDismiss = { picking = null }) { refs -> dashboards.setItems(board.id, s.id, refs); picking = null }
+    }
+}
+
+/** Lights on, open doors and offline devices among this dashboard's devices. */
+@Composable
+private fun Summary(board: Dashboard, store: LocationStore, manager: ConnectionManager) {
+    val ids = board.deviceIds.filter { id -> store.devices.any { it.id == id } }
+    val entities = ids.flatMap { manager.entities(it) }
+    val lights = entities.count { it.platform is Platform.Light && isOn(it.state) == true }
+    val open = entities.count { it.platform == Platform.BinarySensor && it.deviceClass in setOf("door", "window", "garage_door", "opening") && isOn(it.state) == true }
+    val offline = ids.count { manager.sessions[it].isOffline }
+    val parts = listOfNotNull("$lights ${if (lights == 1) "light" else "lights"} on", if (open > 0) "$open open" else null, if (offline > 0) "$offline offline" else null)
+    Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
+}
+
+@Composable
+private fun SectionView(
+    section: Section, board: Dashboard, store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, settings: DashboardSettings,
+    columns: Int, editing: Boolean, now: Long, resolve: (ItemRef) -> Resolved, open: (ItemRef) -> Unit,
+    onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit, onEdit: () -> Unit, onPick: () -> Unit,
+) {
+    val device = section.deviceId?.let { id -> store.devices.firstOrNull { it.id == id } }
+    val collapsed = settings.collapsibleSections && section.collapsed && !editing
+    val index = board.sections.indexOf(section)
+    val tools: @Composable (Resolved) -> Unit = { r ->
+        ItemTools(
+            onUp = { dashboards.moveItem(board.id, section.id, r.ref, -1) },
+            onDown = { dashboards.moveItem(board.id, section.id, r.ref, 1) },
+            onRemove = { dashboards.removeItem(board.id, section.id, r.ref) },
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (section.type == SectionType.DEVICE && device != null) { StatusDot(manager.sessions[device.id].isConnected); Spacer(Modifier.width(10.dp)) }
+            Column(Modifier.weight(1f)) {
+                val title = section.title.ifBlank { if (section.type == SectionType.DEVICE) device?.name ?: "Device" else "" }
+                if (title.isNotBlank()) Text(title, style = if (section.type == SectionType.HEADING) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
+                when (section.type) {
+                    SectionType.HEADING -> if (section.text.isNotBlank()) Text(section.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SectionType.DEVICE -> Text(
+                        if (device == null) "Device removed" else connectionSummary(manager.sessions[device.id], manager.setupErrors[device.id], manager.lastSeen(device.id), now),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> if (editing) Text("${section.type.label} · ${section.items.size} entities", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (editing) {
+                IconButton(enabled = index > 0, onClick = { dashboards.moveSection(board.id, section.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
+                IconButton(enabled = index < board.sections.lastIndex, onClick = { dashboards.moveSection(board.id, section.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit section") }
+                IconButton(onClick = { dashboards.deleteSection(board.id, section.id) }) { Icon(Icons.Default.Delete, "Delete section") }
+            } else {
+                if (section.type == SectionType.DEVICE && device != null) IconButton(onClick = { onInfo(device) }) { Icon(Icons.Default.Info, "Device information") }
+                if (settings.collapsibleSections && section.type != SectionType.HEADING) IconButton(onClick = { dashboards.toggleCollapsed(board.id, section.id) }) {
+                    Icon(Icons.Default.ExpandMore, if (collapsed) "Expand" else "Collapse", Modifier.rotate(if (collapsed) -90f else 0f))
+                }
+            }
+        }
+        if (!collapsed) when (section.type) {
+            SectionType.HEADING -> Unit
+            SectionType.TILES, SectionType.LIST -> {
+                val items = section.items.map(resolve)
+                if (items.isEmpty()) Text(if (editing) "No entities yet." else "—", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (section.type == SectionType.TILES) TilesAndReadings(items, settings, columns, editing, settings.showDeviceNames, open, tools)
+                else ListCard(items, settings, editing, settings.showDeviceNames, open, tools)
+                if (editing) TextButton(onClick = onPick) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add or remove entities") }
+            }
+            SectionType.DEVICE -> if (device == null) Text("This device is no longer in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            else {
+                val items = manager.entities(device.id)
+                    .filter { settings.showConfigDiagnostic || it.category == EntityCategory.NONE }
+                    .map { resolve(ItemRef(device.id, it.stableId)) }
+                if (items.isEmpty()) Text(if (manager.sessions[device.id].isConnected) "Waiting for device states…" else "—", style = MaterialTheme.typography.bodySmall)
+                TilesAndReadings(items, settings, columns, editing = false, showDevice = false, open = open, itemTools = null)
+                if (manager.setupErrors[device.id] != null) TextButton(onClick = { onSetup(device) }) { Text("Fix connection settings") }
+            }
+        }
+        // Without snackbars, command failures are shown under the section they happened in.
+        if (!settings.snackbarErrors) {
+            val ids = if (section.type == SectionType.DEVICE) listOfNotNull(section.deviceId) else section.items.map { it.deviceId }.distinct()
+            ids.mapNotNull { manager.sessions[it]?.lastError?.message }.distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+/** Controls as tiles in [columns]; read-only values as a list card (or as tiles, per settings). */
+@Composable
+private fun TilesAndReadings(items: List<Resolved>, settings: DashboardSettings, columns: Int, editing: Boolean, showDevice: Boolean, open: (ItemRef) -> Unit, itemTools: (@Composable (Resolved) -> Unit)?) {
+    val asList = settings.readingsAsList
+    val tiles = items.filter { !asList || it.entity == null || !it.entity.platform.isReadOnly }
+    val readings = if (asList) items.filter { it.entity?.platform?.isReadOnly == true } else emptyList()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tiles.chunked(columns).forEach { row ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { r ->
+                    val m = Modifier.weight(1f).fillMaxHeight().alpha(if (settings.dimOffline && r.session.isOffline) 0.5f else 1f)
+                    val toolsFor: (@Composable () -> Unit)? = if (editing && itemTools != null) { { itemTools(r) } } else null
+                    if (!r.available) UnavailableTile(r, m, toolsFor)
+                    else EntityTile(r.entity!!, r.session, r.live, m,
+                        deviceLabel = if (showDevice) r.device!!.name else null,
+                        onOpen = if (editing || !settings.controlsSheet) null else { { open(r.ref) } },
+                        overlay = toolsFor?.let { t -> { Box(Modifier.align(Alignment.TopEnd)) { t() } } })
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        if (readings.isNotEmpty()) ListCard(readings, settings, editing, showDevice, open, itemTools)
+    }
+}
+
+/** One card of rows: read-only values on the right, controls inline (or a plain row while editing). */
+@Composable
+private fun ListCard(items: List<Resolved>, settings: DashboardSettings, editing: Boolean, showDevice: Boolean, open: (ItemRef) -> Unit, itemTools: (@Composable (Resolved) -> Unit)?) {
+    if (items.isEmpty()) return
+    Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) {
+            items.forEachIndexed { i, r ->
+                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                Box(Modifier.alpha(if (settings.dimOffline && r.session.isOffline) 0.5f else 1f)) {
+                    val label = if (showDevice) r.device?.name else null
+                    val entity = r.entity
+                    when {
+                        entity == null || r.device == null -> Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (r.device == null) "Device removed" else "Entity not available yet", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (editing) itemTools?.invoke(r)
+                        }
+                        entity.platform.isReadOnly || editing -> ReadOnlyRow(
+                            entity, deviceLabel = label,
+                            onOpen = if (editing || !settings.controlsSheet) null else { { open(r.ref) } },
+                            trailing = if (editing && itemTools != null) { { itemTools(r) } } else null,
                         )
+                        else -> Column {
+                            EntityControls(entity, r.session, r.live, Modifier.padding(vertical = 4.dp), leadingIcon = true)
+                            label?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 36.dp, bottom = 6.dp)) }
+                        }
                     }
                 }
             }
@@ -171,30 +266,37 @@ private fun EntityBlock(items: List<Item>, store: LocationStore, manager: Connec
     }
 }
 
-/** Pin and hide buttons shown in edit mode. */
 @Composable
-private fun EditTools(item: Item, store: LocationStore, modifier: Modifier = Modifier) {
-    val layout = store.location.layout
-    val pinned = item.key in layout.pinned
-    val hidden = item.key in layout.hidden
-    Row(modifier) {
-        IconButton(onClick = { store.togglePinned(item.key) }) {
-            Icon(if (pinned) Icons.Default.Star else Icons.Outlined.StarOutline, contentDescription = if (pinned) "Unpin" else "Pin to Favourites", tint = MaterialTheme.colorScheme.primary)
+private fun UnavailableTile(r: Resolved, modifier: Modifier, tools: (@Composable () -> Unit)?) {
+    Card(modifier.heightIn(min = 142.dp), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+        Box(Modifier.fillMaxSize().padding(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.AutoMirrored.Filled.HelpOutline, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (r.device == null) "Device removed" else "Entity not available yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (tools != null) Box(Modifier.align(Alignment.TopEnd)) { tools() }
         }
-        IconButton(onClick = { store.toggleHidden(item.key) }) {
-            Icon(if (hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = if (hidden) "Show on dashboard" else "Hide from dashboard")
-        }
+    }
+}
+
+/** Move and remove buttons for an item in edit mode. */
+@Composable
+private fun ItemTools(onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit) {
+    Row {
+        IconButton(onClick = onUp, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.KeyboardArrowUp, "Move earlier") }
+        IconButton(onClick = onDown, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.KeyboardArrowDown, "Move later") }
+        IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, "Remove from section") }
     }
 }
 
 /** Full controls for one entity without leaving the dashboard. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EntitySheet(item: Item, session: ControlSession?, live: Entity?, onDismiss: () -> Unit) {
+private fun EntitySheet(device: LocationStore.Device, entity: Entity, session: ControlSession?, live: Entity?, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(item.device.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            EntityControls(item.entity, session, live)
+            Text(device.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            EntityControls(entity, session, live)
             if (!session.isConnected) Text("Controls are available when the device is connected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

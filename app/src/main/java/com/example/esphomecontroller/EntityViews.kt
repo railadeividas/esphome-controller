@@ -96,9 +96,13 @@ private val Platform.isToggle get() = this is Platform.Light || this == Platform
 /** Platforms whose current value is shown as text next to the icon or name. */
 private val Platform.showsValue get() = isReadOnly || this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
 
+/** Presentation options set per dashboard; screens without a dashboard use the defaults. */
+data class EntityStyle(val brightnessPercent: Boolean = true, val tapToToggle: Boolean = false, val pendingSpinner: Boolean = false)
+val LocalEntityStyle = staticCompositionLocalOf { EntityStyle() }
+
 /** Wraps a send so that only the live (current-connection) entity is ever commanded. */
-private class Sender(val session: ControlSession?, val live: Entity?, val ready: Boolean) {
-    operator fun invoke(command: Command) { if (ready && live != null) session?.send(live, command) }
+private class Sender(val session: ControlSession?, val live: Entity?, val ready: Boolean, val onSent: () -> Unit = {}) {
+    operator fun invoke(command: Command) { if (ready && live != null) { session?.send(live, command); onSent() } }
 }
 
 /**
@@ -107,9 +111,20 @@ private class Sender(val session: ControlSession?, val live: Entity?, val ready:
  */
 @Composable
 fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null) {
-    val send = Sender(session, live, isCommandReady(session.isConnected, live))
+    val style = LocalEntityStyle.current
+    // Pending until the device reports a new state for this entity, or for at most five seconds.
+    var pending by remember(entity.stableId) { mutableStateOf(false) }
+    LaunchedEffect(live?.state) { pending = false }
+    LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
-    val gestures = if (onOpen == null) Modifier else Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) }
+    val tapToggle = style.tapToToggle && p.isToggle && overlay == null
+    val gestures = if (onOpen == null && !tapToggle) Modifier else Modifier.pointerInput(onOpen, tapToggle, send.ready, isOn(live?.state)) {
+        detectTapGestures(
+            onTap = if (tapToggle) { _ -> send(Command.SetOn(isOn(live?.state) != true)) } else null,
+            onLongPress = if (onOpen != null) { _ -> onOpen() } else null,
+        )
+    }
     Card(modifier.heightIn(min = 142.dp).then(gestures), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
       Box {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -140,6 +155,7 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
                 else -> Unit
             }
         }
+        if (pending) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(10.dp).size(16.dp), strokeWidth = 2.dp)
         overlay?.invoke(this)
       }
     }
@@ -255,7 +271,7 @@ private fun BrightnessSlider(entity: Entity, send: Sender) {
     val on = isOn(entity.state) == true
     Row(verticalAlignment = Alignment.CenterVertically) {
         Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.weight(1f))
-        Text(if (on) "${Math.round(slider * 100)}%" else "Off", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.width(40.dp))
+        if (LocalEntityStyle.current.brightnessPercent) Text(if (on) "${Math.round(slider * 100)}%" else "Off", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.width(40.dp))
     }
 }
 

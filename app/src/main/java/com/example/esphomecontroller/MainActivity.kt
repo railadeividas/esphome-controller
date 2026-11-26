@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private val found = mutableMapOf<String, Int>()
     private var resolving = false
     private lateinit var store: LocationStore
+    private lateinit var dashboards: DashboardStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,8 +55,9 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
         store = LocationStore(getSharedPreferences("locations", Context.MODE_PRIVATE))
+        dashboards = DashboardStore(getSharedPreferences("locations", Context.MODE_PRIVATE))
         setContent {
-            AppScreen(store, devices, ScanControls(scanning && manualScan, scanned, scanError, start = { startScan(MANUAL_SCAN_MS, manual = true) }, stop = ::stopScan, background = ::backgroundScan))
+            AppScreen(store, dashboards, devices, ScanControls(scanning && manualScan, scanned, scanError, start = { startScan(MANUAL_SCAN_MS, manual = true) }, stop = ::stopScan, background = ::backgroundScan))
         }
     }
 
