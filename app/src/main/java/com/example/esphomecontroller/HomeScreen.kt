@@ -105,7 +105,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
         details?.let { id -> home.devices.find { it.id == id }?.let { d ->
             AlertDialog(
                 onDismissRequest = { details = null }, title = { Text(d.name) },
-                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Device information", style = MaterialTheme.typography.titleSmall); DeviceInfoLines(d, manager.sessions[id], manager.setupErrors[id]) } },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Device information", style = MaterialTheme.typography.titleSmall); DeviceInfoLines(d, manager.sessions[id], manager.setupErrors[id], manager.details(home.id, id)) } },
                 confirmButton = { TextButton(onClick = { details = null; edit(d, false) }) { Text("Edit device") } },
                 dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
             )

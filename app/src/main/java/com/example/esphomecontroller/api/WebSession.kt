@@ -25,6 +25,8 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override val details: DeviceDetails? = null
+    /** The event stream has no end-of-list marker, so cached entities are only ever added to. */
+    override val entitiesComplete = false
     override var lastError by mutableStateOf<CommandError?>(null); private set
     private val failed = FailedCommand()
     override fun retryFailed() = failed.retry(entities, connection is ConnectionState.Connected, ::send)

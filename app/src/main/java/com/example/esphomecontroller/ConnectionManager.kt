@@ -19,6 +19,11 @@ import com.example.esphomecontroller.api.Entity
 import com.example.esphomecontroller.api.SecretStore
 import com.example.esphomecontroller.api.WebSession
 import com.example.esphomecontroller.api.mergeCachedEntities
+import com.example.esphomecontroller.api.DeviceDetails
+import com.example.esphomecontroller.api.sameEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -34,7 +39,14 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     val sessions = mutableStateMapOf<String, ControlSession>()
     /** Problems that need the user (missing key, bad address); not retried until settings change. */
     val setupErrors = mutableStateMapOf<String, String>()
+    /** Last known entities per "homeId/deviceId": metadata survives restarts (see [ControlCache]); states stay in memory. */
     private val cache = mutableStateMapOf<String, List<Entity>>()
+    private val cachedDetails = mutableStateMapOf<String, DeviceDetails>()
+    private val disk = ControlCache(java.io.File(app.noBackupFilesDir, "control-cache.json"))
+    /** What was last written, without states, to avoid rewriting the file on every state update. */
+    private var saved: Map<String, ControlCache.Entry> = emptyMap()
+    private var saveJob: Job? = null
+    private var pendingSave: Map<String, ControlCache.Entry>? = null
     /** Incremented when a device that follows discovery cannot be reached, so the UI can scan for its new address. */
     var discoveryRequests by mutableIntStateOf(0); private set
     private var lastDiscoveryRequest = 0L
@@ -57,11 +69,22 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         try { connectivity?.registerDefaultNetworkCallback(networkCallback) } catch (_: Exception) { /* Retries still recover without callbacks. */ }
         viewModelScope.launch { retryLoop() }
         viewModelScope.launch {
-            snapshotFlow { sessions.mapValues { it.value.entities } }.collect { snapshots ->
-                snapshots.forEach { (id, entities) ->
+            saved = withContext(Dispatchers.IO) { disk.load() }
+            saved.forEach { (key, entry) ->
+                if (key !in cache && entry.entities.isNotEmpty()) cache[key] = entry.entities
+                entry.details?.let { if (key !in cachedDetails) cachedDetails[key] = it }
+            }
+            snapshotFlow { sessions.mapValues { Triple(it.value.entities, it.value.entitiesComplete, it.value.details) } }.collect { snapshots ->
+                snapshots.forEach { (id, snapshot) ->
+                    val (entities, complete, details) = snapshot
                     val target = targets[id] ?: return@forEach
-                    if (entities.isNotEmpty()) cache[cacheKey(target.homeId, id)] = mergeCachedEntities(cache[cacheKey(target.homeId, id)].orEmpty(), entities)
+                    val key = cacheKey(target.homeId, id)
+                    val cached = cache[key].orEmpty()
+                    // A complete listing replaces the saved controls so removed entities disappear; otherwise only add.
+                    if (entities.isNotEmpty()) cache[key] = mergeCachedEntities(if (complete) cached.filter { c -> entities.any { sameEntity(c, it) } } else cached, entities)
+                    details?.let { cachedDetails[key] = it }
                 }
+                scheduleSave()
             }
         }
     }
@@ -72,7 +95,30 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     fun entities(homeId: String, deviceId: String): List<Entity> =
         mergeCachedEntities(cache[cacheKey(homeId, deviceId)].orEmpty(), sessions[deviceId]?.entities.orEmpty())
 
-    fun forget(homeId: String, deviceId: String) { cache.remove(cacheKey(homeId, deviceId)) }
+    /** Device details from the live session, or the saved copy while offline. */
+    fun details(homeId: String, deviceId: String): DeviceDetails? = sessions[deviceId]?.details ?: cachedDetails[cacheKey(homeId, deviceId)]
+
+    fun forget(homeId: String, deviceId: String) {
+        val key = cacheKey(homeId, deviceId)
+        cache.remove(key); cachedDetails.remove(key)
+        scheduleSave()
+    }
+
+    /** Writes changed metadata (never states) shortly after it changes. */
+    private fun scheduleSave() {
+        val entries = (cache.keys + cachedDetails.keys).associateWith { key ->
+            ControlCache.Entry(cache[key].orEmpty().map { it.copy(state = null) }, cachedDetails[key])
+        }
+        // State updates arrive every second on some devices; only metadata changes restart the delay.
+        if (entries == saved || entries == pendingSave) return
+        pendingSave = entries
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            delay(1000)
+            withContext(Dispatchers.IO) { try { disk.save(entries) } catch (_: Exception) { /* The cache is only a convenience. */ } }
+            saved = entries; pendingSave = null
+        }
+    }
 
     /** Reconciles sessions with the selected home. Only devices whose connection settings changed are restarted. */
     fun sync(home: HomeStore.Home, active: Boolean) {

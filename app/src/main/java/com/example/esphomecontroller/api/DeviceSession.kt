@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit
 interface ControlSession : AutoCloseable {
     val connection: ConnectionState
     val entities: List<Entity>
+    /** True once the device has listed all of its entities on this connection, so missing ones were removed. */
+    val entitiesComplete: Boolean
     val details: DeviceDetails?
     /** The last command failure; does not by itself mean the connection is down. */
     val lastError: CommandError?
@@ -59,6 +61,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
     override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override var details by mutableStateOf<DeviceDetails?>(null); private set
+    override var entitiesComplete by mutableStateOf(false); private set
     override var lastError by mutableStateOf<CommandError?>(null); private set
     private val failed = FailedCommand()
     override var logs by mutableStateOf<List<String>>(emptyList()); private set
@@ -102,7 +105,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
                     is NativeEvent.Info -> publish { details = event.details }
                     is NativeEvent.EntityListed -> publish { entities = entities.filterNot { sameEntity(it, event.entity) } + event.entity }
                     // Subscribe only after the entity list so that no initial state arrives before its entity.
-                    NativeEvent.EntitiesDone -> send(MessageType.SUBSCRIBE_STATES_REQUEST, byteArrayOf())
+                    NativeEvent.EntitiesDone -> { send(MessageType.SUBSCRIBE_STATES_REQUEST, byteArrayOf()); publish { entitiesComplete = true } }
                     is NativeEvent.StateChanged -> publish {
                         entities = applyState(entities, event)
                         if (logsWanted) entities.firstOrNull { it.webId == null && it.key == event.key && it.deviceId == event.deviceId }?.let { logs = appendLog(logs, stateLogLine(it)) }

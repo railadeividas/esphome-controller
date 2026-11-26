@@ -59,12 +59,12 @@ fun StatusDot(connected: Boolean) =
 
 /** Connection and firmware information shared by the info dialog and the device page. */
 @Composable
-fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupError: String?) {
+fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails? = session?.details) {
     Text("Address: ${device.address}")
     Text("Connection: ${connectionDetail(session, setupError)}")
     Text("Interface: ${if (device.isWeb) "Web server" else "Native API"}")
     Text("Security: ${securityLabel(device)}")
-    session?.details?.let { d ->
+    details?.let { d ->
         listOf("Model" to d.model, "Manufacturer" to d.manufacturer, "ESPHome" to d.esphomeVersion, "Project" to d.project)
             .filter { it.second.isNotBlank() }.forEach { (label, value) -> Text("$label: $value") }
     }
@@ -163,7 +163,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Device information", style = MaterialTheme.typography.titleMedium)
-                    DeviceInfoLines(device, session, manager.setupErrors[device.id])
+                    DeviceInfoLines(device, session, manager.setupErrors[device.id], manager.details(store.home.id, device.id))
                 }
             }
         }
