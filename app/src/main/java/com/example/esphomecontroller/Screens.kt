@@ -116,13 +116,8 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
             TextButton(onClick = scan.stop) { Text("Stop") }
         } else TextButton(onClick = scan.start) { Text("Refresh") }
     }
-    val statusText = when {
-        scan.scanning -> "Searching for devices…"
-        scan.error != null -> scan.error
-        scan.finished -> when (available.size) { 0 -> "Search finished. No new devices found."; 1 -> "Search finished. Found 1 new device."; else -> "Search finished. Found ${available.size} new devices." }
-        else -> "Tap Refresh to search for devices."
-    }
-    Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (!scan.scanning && scan.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+    // The spinner and the list show progress and results; only explain failures.
+    if (!scan.scanning) scan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         if (available.isEmpty() && !scan.scanning && scan.finished) item {
             Card(Modifier.fillMaxWidth()) {
