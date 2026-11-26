@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -17,7 +18,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
-    private val devices = mutableStateMapOf<String, DiscoveredDevice>()
+    /** Found devices live in a ViewModel so they survive rotation and last until the app is closed. */
+    class Found : androidx.lifecycle.ViewModel() { val devices = mutableStateMapOf<String, DiscoveredDevice>() }
+    private val devices get() = found_.devices
+    private val found_: Found by viewModels()
+    /** Whether the running scan was started by the user; background scans stay silent in Discover. */
+    private var manualScan by mutableStateOf(false)
     /** Discovery runs in bounded scans, like a Bluetooth scan, rather than continuously. */
     private var scanning by mutableStateOf(false)
     private var scanError by mutableStateOf<String?>(null)
@@ -49,18 +55,19 @@ class MainActivity : ComponentActivity() {
         nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
         store = HomeStore(getSharedPreferences("homes", Context.MODE_PRIVATE))
         setContent {
-            HomeScreen(store, devices, ScanControls(scanning, scanned, scanError, start = { startScan(clear = true, MANUAL_SCAN_MS) }, stop = ::stopScan, background = ::backgroundScan))
+            HomeScreen(store, devices, ScanControls(scanning && manualScan, scanned, scanError, start = { startScan(MANUAL_SCAN_MS, manual = true) }, stop = ::stopScan, background = ::backgroundScan))
         }
     }
 
     // A short scan on start refreshes the addresses of saved devices.
-    override fun onStart() { super.onStart(); startScan(clear = false, BACKGROUND_SCAN_MS) }
+    override fun onStart() { super.onStart(); startScan(BACKGROUND_SCAN_MS) }
     override fun onStop() { stopScan(); super.onStop() }
 
-    private fun startScan(clear: Boolean, durationMs: Long) {
+    /** Found devices are kept until the app closes; a new scan only adds to or updates them. */
+    private fun startScan(durationMs: Long, manual: Boolean = false) {
         stopDiscovery()
+        manualScan = manual
         handler.removeCallbacks(endScan); extensions = 0
-        if (clear) devices.clear()
         scanError = null; scanning = true
         startDiscovery()
         handler.postDelayed(endScan, durationMs)
@@ -68,13 +75,13 @@ class MainActivity : ComponentActivity() {
 
     private fun stopScan() {
         handler.removeCallbacks(endScan)
-        if (scanning) scanned = true
-        scanning = false
+        if (scanning && manualScan) scanned = true
+        scanning = false; manualScan = false
         stopDiscovery()
     }
 
     /** Requested when a device that follows discovery cannot be reached; never interrupts a running scan. */
-    private fun backgroundScan() { if (!scanning) startScan(clear = false, BACKGROUND_SCAN_MS) }
+    private fun backgroundScan() { if (!scanning) startScan(BACKGROUND_SCAN_MS) }
 
     private fun stopDiscovery() {
         generation++
@@ -94,16 +101,16 @@ class MainActivity : ComponentActivity() {
             val discovery = object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(type: String) {}
                 override fun onDiscoveryStopped(type: String) {}
-                override fun onStartDiscoveryFailed(type: String, error: Int) { runOnUiThread { if (generation == current) { stopScan(); scanError = "Discovery failed ($error). Check Wi-Fi and try again." } } }
+                override fun onStartDiscoveryFailed(type: String, error: Int) { runOnUiThread { if (generation == current) { val manual = manualScan; stopScan(); if (manual) scanError = "Discovery failed ($error). Check Wi-Fi and try again." } } }
                 override fun onStopDiscoveryFailed(type: String, error: Int) {}
                 override fun onServiceLost(service: NsdServiceInfo) { runOnUiThread {
                     if (generation == current) {
                         val remaining = (found[service.serviceName] ?: 1) - 1
                         if (remaining > 0) found[service.serviceName] = remaining
                         else {
+                            // Stop resolving it, but keep it listed: the user may still want to add it.
                             found.remove(service.serviceName)
                             pending.removeAll { it.serviceName == service.serviceName }
-                            devices.remove(service.serviceName)
                         }
                     }
                 } }
@@ -119,7 +126,7 @@ class MainActivity : ComponentActivity() {
             }
             listener = discovery
             nsd.discoverServices("_esphomelib._tcp.", NsdManager.PROTOCOL_DNS_SD, discovery)
-        } catch (e: Exception) { stopScan(); scanError = "Discovery unavailable: ${e.localizedMessage}" }
+        } catch (e: Exception) { val manual = manualScan; stopScan(); if (manual) scanError = "Discovery unavailable: ${e.localizedMessage}" }
     }
     @Suppress("DEPRECATION")
     private fun resolveNext(current: Int) {
@@ -131,7 +138,7 @@ class MainActivity : ComponentActivity() {
                 override fun onResolveFailed(info: NsdServiceInfo, error: Int) = runOnUiThread {
                     if (generation == current) {
                         resolving = false
-                        scanError = "Could not resolve ${info.serviceName} ($error)."
+                        if (manualScan) scanError = "Could not resolve ${info.serviceName} ($error)."
                         resolveNext(current)
                     }
                 }
@@ -150,7 +157,7 @@ class MainActivity : ComponentActivity() {
             })
         } catch (e: Exception) {
             resolving = false
-            scanError = "Could not resolve ${service.serviceName}: ${e.localizedMessage}"
+            if (manualScan) scanError = "Could not resolve ${service.serviceName}: ${e.localizedMessage}"
             resolveNext(current)
         }
     }

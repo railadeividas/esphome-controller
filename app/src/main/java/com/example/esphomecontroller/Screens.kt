@@ -88,8 +88,6 @@ fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupErr
 @Composable
 fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (HomeStore.Device) -> Unit) {
     val home = store.home
-    // Like Bluetooth settings: opening the page starts a scan.
-    LaunchedEffect(Unit) { if (!scan.scanning) scan.start() }
     val available = discovered.values.filterNot { d -> store.contains(d.serviceName) }.sortedBy { it.displayName.lowercase() }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("New devices are added to ${home.name}; you can change this during setup.", style = MaterialTheme.typography.bodySmall) }
@@ -101,6 +99,9 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
     // The spinner and the list show progress and results; only explain failures.
     if (!scan.scanning) scan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+        if (available.isEmpty() && !scan.scanning && !scan.finished) item {
+            Text("Tap Refresh to search for devices on this network.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (available.isEmpty() && !scan.scanning && scan.finished) item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
