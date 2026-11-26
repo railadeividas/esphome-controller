@@ -90,9 +90,9 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
     val home = store.home
     // Like Bluetooth settings: opening the page starts a scan.
     LaunchedEffect(Unit) { if (!scan.scanning) scan.start() }
-    val available = discovered.values.filterNot { d -> home.devices.any { it.id == d.serviceName } }.sortedBy { it.displayName.lowercase() }
+    val available = discovered.values.filterNot { d -> store.contains(d.serviceName) }.sortedBy { it.displayName.lowercase() }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("Choose a device for ${home.name}", style = MaterialTheme.typography.bodySmall) }
+        Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("New devices are added to ${home.name}; you can change this during setup.", style = MaterialTheme.typography.bodySmall) }
         if (scan.scanning) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             TextButton(onClick = scan.stop) { Text("Stop") }
@@ -107,20 +107,18 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
                     Text("No new devices found", style = MaterialTheme.typography.titleSmall)
                     Text("• The phone must be on the same Wi-Fi network as the device.", style = MaterialTheme.typography.bodySmall)
                     Text("• Discovery (mDNS) does not cross VLANs or subnets unless the network repeats it.", style = MaterialTheme.typography.bodySmall)
-                    Text("• The device needs the api: component; devices already in this home are hidden.", style = MaterialTheme.typography.bodySmall)
+                    Text("• The device needs the api: component; devices already added to the app are hidden.", style = MaterialTheme.typography.bodySmall)
                     Text("You can still add a device by its address.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
         items(available, key = { it.serviceName }) { d ->
-            val otherHomes = store.homes.filter { h -> h.id != home.id && h.devices.any { it.id == d.serviceName } }.map { it.name }
             Card(onClick = { onSetup(HomeStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(d.displayName, style = MaterialTheme.typography.titleMedium)
                         if (d.summary.isNotBlank()) Text(d.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(encryptionText(d.encryption), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (otherHomes.isNotEmpty()) Text("Also in ${otherHomes.joinToString()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                     EncryptionIcon(d.encryption)
                     Spacer(Modifier.width(12.dp))
@@ -151,18 +149,19 @@ private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp
 fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
     val home = store.home
     Text("Devices", style = MaterialTheme.typography.titleLarge)
-    Text("${home.name} · ${home.devices.size} devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (home.devices.isEmpty()) Text("No devices in this home yet.")
+    Text("${store.devices.size} devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (store.devices.isEmpty()) Text("No devices yet. Add one from Discover.")
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        items(home.devices, key = { it.id }) { d ->
+        items(store.devices, key = { it.id }) { d ->
             val session = manager.sessions[d.id]
             Card(onClick = { onOpen(d.id) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DeviceAvatar(deviceIcon(manager.entities(home.id, d.id)), session.isConnected)
+                    DeviceAvatar(deviceIcon(manager.entities(d.id)), session.isConnected)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
                         Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(store.homeName(d.homeId) ?: "Not in a home", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -178,8 +177,8 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
     var infoOpen by rememberSaveable(device.id) { mutableStateOf(false) }
     if (showLogs) { DeviceLogs(device, session, onBack = { showLogs = false }); return }
     val live = session?.entities.orEmpty()
-    val entities = manager.entities(store.home.id, device.id)
-    val details = manager.details(store.home.id, device.id)
+    val entities = manager.entities(device.id)
+    val details = manager.details(device.id)
     val setupError = manager.setupErrors[device.id]
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {

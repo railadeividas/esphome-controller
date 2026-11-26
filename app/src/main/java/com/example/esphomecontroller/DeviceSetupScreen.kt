@@ -50,6 +50,9 @@ fun DeviceSetupScreen(
     discovered: DiscoveredDevice?,
     isNew: Boolean,
     secrets: SecretStore,
+    /** (id, name) of every home, for the Home picker. */
+    homes: List<Pair<String, String>>,
+    defaultHome: String?,
     onDismiss: () -> Unit,
     onSave: (HomeStore.Device) -> Unit,
     onRemove: (() -> Unit)?,
@@ -71,6 +74,8 @@ fun DeviceSetupScreen(
     var username by remember(device.id) { mutableStateOf(webCredentials?.optString("username") ?: "") }
     var password by remember(device.id) { mutableStateOf("") }
     var showAdvanced by remember(device.id) { mutableStateOf(false) }
+    var homeId by remember(device.id) { mutableStateOf(defaultHome?.takeIf { id -> homes.any { it.first == id } }) }
+    var homesExpanded by remember { mutableStateOf(false) }
     var status by remember(device.id) { mutableStateOf<SetupStatus>(SetupStatus.None) }
     val busy = status is SetupStatus.Busy
 
@@ -114,7 +119,7 @@ fun DeviceSetupScreen(
                 val data = JSONObject().put("username", username.trim()).put("password", password.ifBlank { webCredentials!!.getString("password") }).toString().toByteArray(Charsets.UTF_8)
                 try { secrets.save("web:${device.id}", data) } finally { data.fill(0) }
             }
-            onSave(device.copy(name = name.trim(), address = joinAddress(e.host, e.port), mode = mode, followDiscovery = followDiscovery && !manual))
+            onSave(device.copy(name = name.trim(), address = joinAddress(e.host, e.port), mode = mode, followDiscovery = followDiscovery && !manual, homeId = homeId))
             key = ""; password = ""
         } catch (_: Exception) { status = SetupStatus.Message("Could not store the credentials securely. Try again.", true) }
     }
@@ -177,6 +182,18 @@ fun DeviceSetupScreen(
         }
 
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+
+        // A device belongs to the app and is shown on at most one home's dashboard.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Home", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Box {
+                OutlinedButton(onClick = { homesExpanded = true }) { Text((homes.firstOrNull { it.first == homeId }?.second ?: "Not in a home") + " ▾") }
+                DropdownMenu(expanded = homesExpanded, onDismissRequest = { homesExpanded = false }) {
+                    homes.forEach { (id, homeName) -> DropdownMenuItem(text = { Text(homeName) }, onClick = { homeId = id; homesExpanded = false }) }
+                    DropdownMenuItem(text = { Text("Not in a home") }, onClick = { homeId = null; homesExpanded = false })
+                }
+            }
+        }
 
         if (manual) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -262,7 +279,7 @@ fun DeviceSetupScreen(
             if (!isWebMode(mode)) OutlinedButton(enabled = !busy && mode.isNotBlank(), onClick = { validate()?.let { status = SetupStatus.Message(it, true) } ?: runProbe(afterSuccess = false, offerSaveAnyway = false) }) { Text("Test connection") }
             Button(enabled = !busy, onClick = ::save) { Text(if (isNew) "Add device" else "Save") }
         }
-        if (onRemove != null) TextButton(onClick = onRemove) { Text("Remove from home", color = MaterialTheme.colorScheme.error) }
+        if (onRemove != null) TextButton(onClick = onRemove) { Text("Remove device", color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(20.dp))
     }
 }

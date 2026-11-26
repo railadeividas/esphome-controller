@@ -39,7 +39,7 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(30_000); now = System.currentTimeMillis() } }
 
-    fun entitiesOf(d: HomeStore.Device) = manager.entities(home.id, d.id)
+    fun entitiesOf(d: HomeStore.Device) = manager.entities(d.id)
         .filter { store.showAllEntities || it.category == EntityCategory.NONE }
         .map { Item(d, it) }
         .filter { editing || it.key !in layout.hidden }
@@ -105,7 +105,7 @@ fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes:
 
     sheet?.let { (deviceId, stableId) ->
         val device = home.devices.firstOrNull { it.id == deviceId }
-        val entity = device?.let { d -> manager.entities(home.id, d.id).firstOrNull { it.stableId == stableId } }
+        val entity = device?.let { d -> manager.entities(d.id).firstOrNull { it.stableId == stableId } }
         if (device != null && entity != null) EntitySheet(Item(device, entity), manager.sessions[device.id], live(Item(device, entity))) { sheet = null }
     }
 }

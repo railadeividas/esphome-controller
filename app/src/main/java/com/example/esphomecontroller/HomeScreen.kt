@@ -45,7 +45,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
         activity.lifecycle.addObserver(observer)
         onDispose { activity.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(home, active) { manager.sync(home, active) }
+    LaunchedEffect(store.devices, active) { manager.sync(store.devices, active) }
     // An unreachable device may have a new address; a short scan lets it follow.
     LaunchedEffect(manager.discoveryRequests) { if (manager.discoveryRequests > 0) scan.background() }
 
@@ -75,18 +75,18 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
                 Spacer(Modifier.height(6.dp))
                 Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val setup = editing
-                    if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, onDismiss = { editing = null }, onSave = { updated ->
+                    if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, store.homes.map { it.id to it.name }, defaultHome = setup.homeId ?: if (isNew) store.selected else null, onDismiss = { editing = null }, onSave = { updated ->
                         // A different interface yields different entity identities; drop the old cached ones.
-                        if (setup.mode != updated.mode && !(setup.mode == null && updated.mode == "encrypted")) manager.forget(home.id, setup.id)
+                        if (setup.mode != updated.mode && !(setup.mode == null && updated.mode == "encrypted")) manager.forget(setup.id)
                         store.putDevice(updated); editing = null
-                        manager.sync(store.home, active); manager.reconnect(updated.id)
+                        manager.sync(store.devices, active); manager.reconnect(updated.id)
                         if (isNew) page = Page.HOME
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
                         Page.HOME -> DashboardScreen(store, manager, onManageHomes = { page = Page.SETTINGS }, onAdd = { page = Page.DISCOVER }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
-                            val device = home.devices.firstOrNull { it.id == selectedDevice }
+                            val device = store.devices.firstOrNull { it.id == selectedDevice }
                             if (device == null) DeviceListScreen(store, manager, onOpen = { selectedDevice = it })
                             else DeviceDetailScreen(store, manager, device, onBack = { selectedDevice = null }, onEdit = { edit(device, false) })
                         }
@@ -102,21 +102,21 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
           }
         }
-        details?.let { id -> home.devices.find { it.id == id }?.let { d ->
+        details?.let { id -> store.devices.find { it.id == id }?.let { d ->
             AlertDialog(
                 onDismissRequest = { details = null }, title = { Text(d.name) },
-                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Device information", style = MaterialTheme.typography.titleSmall); DeviceInfoLines(d, manager.sessions[id], manager.setupErrors[id], manager.details(home.id, id)) } },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Device information", style = MaterialTheme.typography.titleSmall); DeviceInfoLines(d, manager.sessions[id], manager.setupErrors[id], manager.details(id)) } },
                 confirmButton = { TextButton(onClick = { details = null; edit(d, false) }) { Text("Edit device") } },
                 dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
             )
         } }
         removeId?.let { id ->
             AlertDialog(
-                onDismissRequest = { removeId = null }, title = { Text("Remove device?") }, text = { Text("The device will be removed from ${home.name}.") },
+                onDismissRequest = { removeId = null }, title = { Text("Remove device?") }, text = { Text("The device and its saved keys will be removed from the app.") },
                 confirmButton = { TextButton(onClick = {
                     store.removeDevice(id); if (selectedDevice == id) selectedDevice = null
-                    manager.forget(home.id, id)
-                    if (!store.isDeviceInAnyHome(id)) { manager.secrets.remove(id); manager.secrets.remove("web:$id") }
+                    manager.forget(id)
+                    manager.secrets.remove(id); manager.secrets.remove("web:$id")
                     removeId = null
                 }) { Text("Remove") } },
                 dismissButton = { TextButton(onClick = { removeId = null }) { Text("Cancel") } },

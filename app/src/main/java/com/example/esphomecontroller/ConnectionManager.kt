@@ -39,7 +39,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     val sessions = mutableStateMapOf<String, ControlSession>()
     /** Problems that need the user (missing key, bad address); not retried until settings change. */
     val setupErrors = mutableStateMapOf<String, String>()
-    /** Last known entities per "homeId/deviceId": metadata survives restarts (see [ControlCache]); states stay in memory. */
+    /** Last known entities per device id: metadata survives restarts (see [ControlCache]); states stay in memory. */
     private val cache = mutableStateMapOf<String, List<Entity>>()
     private val cachedDetails = mutableStateMapOf<String, DeviceDetails>()
     private val disk = ControlCache(java.io.File(app.noBackupFilesDir, "control-cache.json"))
@@ -54,7 +54,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     private val lastSeen = mutableMapOf<String, Long>()
     fun lastSeen(deviceId: String): Long? = lastSeen[deviceId]
 
-    private data class Target(val homeId: String, val device: HomeStore.Device)
+    private data class Target(val device: HomeStore.Device)
     private val targets = mutableMapOf<String, Target>()
     private val attempts = mutableMapOf<String, Int>()
     private val nextAttempt = mutableMapOf<String, Long>()
@@ -70,6 +70,8 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { retryLoop() }
         viewModelScope.launch {
             saved = withContext(Dispatchers.IO) { disk.load() }
+            // Older versions keyed the cache by "homeId/deviceId"; keys are now the device id.
+            saved = saved.entries.groupBy({ it.key.substringAfter('/') }, { it.value }).mapValues { it.value.first() }
             saved.forEach { (key, entry) ->
                 if (key !in cache && entry.entities.isNotEmpty()) cache[key] = entry.entities
                 entry.details?.let { if (key !in cachedDetails) cachedDetails[key] = it }
@@ -78,7 +80,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
                 snapshots.forEach { (id, snapshot) ->
                     val (entities, complete, details) = snapshot
                     val target = targets[id] ?: return@forEach
-                    val key = cacheKey(target.homeId, id)
+                    val key = id
                     val cached = cache[key].orEmpty()
                     // A complete listing replaces the saved controls so removed entities disappear; otherwise only add.
                     if (entities.isNotEmpty()) cache[key] = mergeCachedEntities(if (complete) cached.filter { c -> entities.any { sameEntity(c, it) } } else cached, entities)
@@ -89,18 +91,16 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun cacheKey(homeId: String, deviceId: String) = "$homeId/$deviceId"
 
     /** Last known entities (for display) merged with the live ones. */
-    fun entities(homeId: String, deviceId: String): List<Entity> =
-        mergeCachedEntities(cache[cacheKey(homeId, deviceId)].orEmpty(), sessions[deviceId]?.entities.orEmpty())
+    fun entities(deviceId: String): List<Entity> =
+        mergeCachedEntities(cache[deviceId].orEmpty(), sessions[deviceId]?.entities.orEmpty())
 
     /** Device details from the live session, or the saved copy while offline. */
-    fun details(homeId: String, deviceId: String): DeviceDetails? = sessions[deviceId]?.details ?: cachedDetails[cacheKey(homeId, deviceId)]
+    fun details(deviceId: String): DeviceDetails? = sessions[deviceId]?.details ?: cachedDetails[deviceId]
 
-    fun forget(homeId: String, deviceId: String) {
-        val key = cacheKey(homeId, deviceId)
-        cache.remove(key); cachedDetails.remove(key)
+    fun forget(deviceId: String) {
+        cache.remove(deviceId); cachedDetails.remove(deviceId)
         scheduleSave()
     }
 
@@ -120,15 +120,15 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Reconciles sessions with the selected home. Only devices whose connection settings changed are restarted. */
-    fun sync(home: HomeStore.Home, active: Boolean) {
-        val wanted = if (active) home.devices.associateBy { it.id } else emptyMap()
+    /** Reconciles sessions with the app's devices. Only devices whose connection settings changed are restarted. */
+    fun sync(devices: List<HomeStore.Device>, active: Boolean) {
+        val wanted = if (active) devices.associateBy { it.id } else emptyMap()
         for ((id, target) in targets.toList()) {
             val device = wanted[id]
-            if (device == null || target.homeId != home.id || !sameConnection(device, target.device)) stop(id)
+            if (device == null || !sameConnection(device, target.device)) stop(id)
             else targets[id] = target.copy(device = device)
         }
-        for ((id, device) in wanted) if (id !in targets) { targets[id] = Target(home.id, device); setupErrors.remove(id) }
+        for ((id, device) in wanted) if (id !in targets) { targets[id] = Target(device); setupErrors.remove(id) }
         connectDue()
     }
 
