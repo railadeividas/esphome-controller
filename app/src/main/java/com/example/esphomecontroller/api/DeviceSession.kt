@@ -115,7 +115,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
                 }
             }
         } catch (e: Exception) {
-            val reason = if (e is java.net.SocketTimeoutException) "Device stopped responding" else e.message ?: e.javaClass.simpleName
+            val reason = failureReason(e)
             publish { connection = ConnectionState.Failed(reason, needsSetup = e is SetupException) }
         } finally {
             key?.fill(0)
@@ -168,6 +168,19 @@ class DeviceSession(private val host: String, private val port: Int, private val
         const val READ_TIMEOUT_MS = 60_000
         const val PING_INTERVAL_MS = 20_000L
     }
+}
+
+/** A short, user-facing reason for a connection failure, without addresses or stack details. */
+fun failureReason(e: Exception): String = when (e) {
+    is SetupException -> e.message ?: "Check the connection settings"
+    is java.net.SocketTimeoutException -> "Device stopped responding"
+    is java.net.NoRouteToHostException -> "Device is not reachable from this network"
+    is java.net.UnknownHostException -> "The device address could not be found"
+    is java.net.ConnectException -> if (e.message.orEmpty().contains("ECONNREFUSED") || e.message.orEmpty().contains("refused", ignoreCase = true)) "The device refused the connection" else "Could not connect to the device"
+    is java.io.EOFException -> "The device closed the connection"
+    is java.net.SocketException -> "The connection was interrupted"
+    is com.google.protobuf.InvalidProtocolBufferException -> "The device sent an unreadable message"
+    else -> e.message?.takeIf { it.length <= 80 && !Regex("""\d{1,3}(\.\d{1,3}){3}""").containsMatchIn(it) } ?: "Connection failed"
 }
 
 fun applyState(entities: List<Entity>, event: NativeEvent.StateChanged): List<Entity> =

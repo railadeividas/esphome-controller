@@ -1,6 +1,20 @@
 package com.example.esphomecontroller
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,11 +56,11 @@ fun relativeTime(then: Long, now: Long): String {
 /** A device whose connection dropped and is being retried; setup problems are shown separately. */
 val ControlSession?.isOffline: Boolean get() = (this?.connection as? ConnectionState.Failed)?.needsSetup == false
 
-private fun connectionDetail(session: ControlSession?, setupError: String?): String = setupError ?: when (val c = session?.connection) {
+private fun connectionDetail(session: ControlSession?, setupError: String?, lastSeen: Long? = null): String = setupError ?: when (val c = session?.connection) {
     null -> "Not connected"
     ConnectionState.Connecting -> "Connecting…"
     is ConnectionState.Connected -> when (c.security) { Security.ENCRYPTED -> "Connected securely"; Security.UNENCRYPTED -> "Connected without encryption"; Security.WEB -> "Connected via web server" }
-    is ConnectionState.Failed -> "Unavailable: ${c.reason} · retrying"
+    is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, System.currentTimeMillis())}" } ?: "") + " · ${c.reason}"
 }
 
 private fun securityLabel(device: HomeStore.Device): String = when (device.mode) {
@@ -118,6 +132,32 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
     }
 }
 
+/** A device's icon: a bulb when it has lights, otherwise a generic board. */
+fun deviceIcon(entities: List<Entity>): ImageVector = if (entities.any { it.platform is Platform.Light }) Icons.Default.Lightbulb else Icons.Default.Memory
+
+/** Rounded device icon in a primary-tinted square, with a connection badge on its corner. */
+@Composable
+private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp) {
+    Box(Modifier.size(size)) {
+        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(size * 0.3f)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(size * 0.56f))
+        }
+        Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(13.dp).background(MaterialTheme.colorScheme.surface, CircleShape).padding(2.dp)
+            .background(if (connected) Color(0xFF36A76B) else Color(0xFFAAA7B2), CircleShape))
+    }
+}
+
+/** Small coloured connection label: green when connected, red for setup problems, grey otherwise. */
+@Composable
+private fun ConnectionChip(text: String, connected: Boolean, problem: Boolean) {
+    val color = when { problem -> MaterialTheme.colorScheme.error; connected -> Color(0xFF36A76B); else -> Color(0xFFAAA7B2) }
+    Row(Modifier.clip(CircleShape).background(color.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).background(color, CircleShape))
+        Spacer(Modifier.width(5.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+    }
+}
+
 @Composable
 fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
     val home = store.home
@@ -127,15 +167,15 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         items(home.devices, key = { it.id }) { d ->
             val session = manager.sessions[d.id]
-            Card(onClick = { onOpen(d.id) }, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(session.isConnected)
-                    Spacer(Modifier.width(12.dp))
+            Card(onClick = { onOpen(d.id) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DeviceAvatar(deviceIcon(manager.entities(home.id, d.id)), session.isConnected)
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall)
+                        Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("View", color = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -146,24 +186,49 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
 fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: HomeStore.Device, onBack: () -> Unit, onEdit: () -> Unit) {
     val session = manager.sessions[device.id]
     var showLogs by remember(device.id) { mutableStateOf(false) }
+    var infoOpen by rememberSaveable(device.id) { mutableStateOf(false) }
     if (showLogs) { DeviceLogs(device, session, onBack = { showLogs = false }); return }
     val live = session?.entities.orEmpty()
     val entities = manager.entities(store.home.id, device.id)
+    val details = manager.details(store.home.id, device.id)
+    val setupError = manager.setupErrors[device.id]
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("‹ Devices") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to devices") }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { showLogs = true }) { Text("Logs") }
-                TextButton(onClick = onEdit) { Text("Edit") }
+                IconButton(onClick = { showLogs = true }) { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = "Device logs") }
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Edit device") }
             }
-            Text(device.name, style = MaterialTheme.typography.headlineSmall)
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Device information", style = MaterialTheme.typography.titleMedium)
-                    DeviceInfoLines(device, session, manager.setupErrors[device.id], manager.details(store.home.id, device.id))
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DeviceAvatar(deviceIcon(entities), session.isConnected, 54.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(device.name, style = MaterialTheme.typography.titleLarge)
+                        ConnectionChip(connectionSummary(session, setupError, manager.lastSeen(device.id)), session.isConnected, setupError != null)
+                        val hardware = listOfNotNull(details?.model?.takeIf { it.isNotBlank() }, details?.esphomeVersion?.takeIf { it.isNotBlank() }?.let { "ESPHome $it" })
+                        if (hardware.isNotEmpty()) Text(hardware.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+                Row(Modifier.fillMaxWidth().clickable { infoOpen = !infoOpen }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Device information", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.ExpandMore, contentDescription = if (infoOpen) "Hide" else "Show", modifier = Modifier.rotate(if (infoOpen) 180f else 0f))
+                }
+                if (infoOpen) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    deviceFacts(device, session, setupError, details, manager.lastSeen(device.id)).forEach { (label, value) ->
+                        Row {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(0.4f))
+                            Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.weight(0.6f))
+                        }
+                    }
+                    session?.lastError?.let { Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 }
             }
         }
@@ -173,6 +238,16 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
         entitySection("Diagnostic", entities.filter { it.category == EntityCategory.DIAGNOSTIC }, session, live)
     }
 }
+
+/** Label/value pairs for the device information grid and dialog. */
+private fun deviceFacts(device: HomeStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails?, lastSeen: Long?): List<Pair<String, String>> =
+    listOf(
+        "Address" to device.address,
+        "Connection" to connectionDetail(session, setupError, lastSeen),
+        "Interface" to if (device.isWeb) "Web server" else "Native API",
+        "Security" to securityLabel(device),
+    ) + listOf("Model" to details?.model, "Manufacturer" to details?.manufacturer, "ESPHome" to details?.esphomeVersion, "Project" to details?.project)
+        .mapNotNull { (k, v) -> v?.takeIf { it.isNotBlank() }?.let { k to it } }
 
 /** Live device logs for the current connection; kept in memory only, never saved or shared. */
 @Composable
@@ -203,8 +278,21 @@ private fun DeviceLogs(device: HomeStore.Device, session: ControlSession?, onBac
 
 private fun LazyListScope.entitySection(title: String, entities: List<Entity>, session: ControlSession?, live: List<Entity>) {
     if (entities.isEmpty()) return
-    item(key = "header:$title") { Text(title, style = MaterialTheme.typography.titleMedium) }
-    items(entities, key = { it.stableId }) { entity -> EntityDetailRow(entity, session, live.firstOrNull { sameEntity(it, entity) }) }
+    item(key = "header:$title") {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 2.dp, end = 2.dp), verticalAlignment = Alignment.Bottom) {
+            Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text("${entities.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    // One card per section, rows separated by dividers.
+    item(key = "group:$title") {
+        Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+            entities.forEachIndexed { i, entity ->
+                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                EntityControls(entity, session, live.firstOrNull { sameEntity(it, entity) }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), leadingIcon = true)
+            }
+        }
+    }
 }
 
 @Composable

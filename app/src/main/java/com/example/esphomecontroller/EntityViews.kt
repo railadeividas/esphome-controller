@@ -87,6 +87,11 @@ fun entityIcon(entity: Entity): ImageVector {
     return byClass ?: entity.platform.icon()
 }
 
+/** The card look used across the app: theme surface (not Material's default grey), 16 dp corners, 1 dp elevation. */
+val AppCardShape = RoundedCornerShape(16.dp)
+@Composable fun appCardColors() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+@Composable fun appCardElevation() = CardDefaults.cardElevation(defaultElevation = 1.dp)
+
 private val Platform.isToggle get() = this is Platform.Light || this == Platform.Switch || this is Platform.Fan
 /** Platforms whose current value is shown as text next to the icon or name. */
 private val Platform.showsValue get() = isReadOnly || this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
@@ -158,12 +163,24 @@ fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit
 /** Device page row: name on the left, value or main control on the right, secondary controls below. */
 @Composable
 fun EntityDetailRow(entity: Entity, session: ControlSession?, live: Entity?) {
-    Card(Modifier.fillMaxWidth()) { EntityControls(entity, session, live, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+    Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) { EntityControls(entity, session, live, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
 }
 
-/** All controls an entity advertises: used on the device page and in the dashboard's bottom sheet. */
+/**
+ * All controls an entity advertises: used on the device page and in the dashboard's bottom sheet.
+ * With [leadingIcon] the entity icon starts the row and secondary controls line up after it.
+ */
 @Composable
-fun EntityControls(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier) {
+fun EntityControls(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier, leadingIcon: Boolean = false) {
+    if (!leadingIcon) { EntityControlsColumn(entity, session, live, modifier); return }
+    Row(Modifier.fillMaxWidth().then(modifier)) {
+        Icon(entityIcon(entity), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 9.dp, end = 14.dp).size(22.dp))
+        EntityControlsColumn(entity, session, live, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun EntityControlsColumn(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier) {
     val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
     run {

@@ -52,4 +52,12 @@ class DashboardModelTest {
         assertEquals("just now", relativeTime(now + 5000, now))
         assertEquals("dev|switch:0:1", HomeStore.entityKey("dev", Entity(1, 0, "x", Platform.Switch).stableId))
     }
+
+    @Test fun failureReasonsHideAddresses() {
+        assertEquals("The device refused the connection", failureReason(java.net.ConnectException("failed to connect to /192.0.2.21 (port 6053) after 8000ms: isConnected failed: ECONNREFUSED (Connection refused)")))
+        assertEquals("Device stopped responding", failureReason(java.net.SocketTimeoutException("Read timed out")))
+        assertEquals("Connection failed", failureReason(java.io.IOException("cannot reach 192.0.2.5")))
+        assertEquals("The device rejected the encryption key", failureReason(KeyRejectedException()))
+        assertEquals("Unsupported API version 2.0", failureReason(java.io.IOException("Unsupported API version 2.0")))
+    }
 }
