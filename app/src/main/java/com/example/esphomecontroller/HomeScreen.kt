@@ -95,7 +95,7 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
                 }
                 if (editing == null) NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
                     listOf(Triple(Page.HOME, "Home", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
-                        NavigationBarItem(selected = page == target, onClick = { if (target == Page.DEVICES && page == Page.DEVICES) selectedDevice = null; page = target }, icon = { Icon(icon, contentDescription = null) }, label = { Text(label) })
+                        NavigationBarItem(selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; page = target }, icon = { Icon(icon, contentDescription = null) }, label = { Text(label) })
                     }
                 }
             }
