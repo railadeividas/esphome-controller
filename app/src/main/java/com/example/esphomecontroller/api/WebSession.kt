@@ -22,8 +22,10 @@ import java.util.concurrent.TimeUnit
 
 /** HTTP web-server interface, opt-in only; it never falls back from the native API. */
 class WebSession(host: String, port: Int, username: String?, password: String?) : ControlSession {
-    override var status by mutableStateOf("Connecting…"); private set
-    override var entities by mutableStateOf<List<DeviceSession.Entity>>(emptyList()); private set
+    override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
+    override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
+    override val details: DeviceDetails? = null
+    override var lastError by mutableStateOf<String?>(null); private set
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val base = HttpUrl.Builder().scheme("http").host(host).port(port).build()
@@ -31,7 +33,6 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     @Volatile private var stream: Call? = null
     @Volatile private var closed = false
     private var nextKey = 0
-    private val hiddenIds = mutableSetOf<String>()
     private val pendingDetails = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val optionsKnown = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     init { Thread({ listen() }, "esphome-web-events").start() }
@@ -45,26 +46,25 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                 if (!response.isSuccessful) throw IOException(if (response.code == 401) "Web server rejected credentials" else "Web server returned HTTP ${response.code}")
                 if (!(response.header("Content-Type") ?: "").startsWith("text/event-stream", ignoreCase = true)) throw IOException("Web server did not provide events")
                 val source = response.body?.source() ?: throw IOException("Empty web server response")
-                publish { status = "Connected via web server" }
+                publish { connection = ConnectionState.Connected(Security.WEB) }
                 consumeWebEvents(source, { closed }, ::handle)
                 if (!closed) throw IOException("Web server disconnected")
             }
-        } catch (e: Exception) { publish { status = "Connection failed: ${e.message ?: "web server unavailable"}" } }
+        } catch (e: Exception) { publish { connection = ConnectionState.Failed(e.message ?: "Web server unavailable") } }
     }
     private fun handle(text: String) {
-        val raw = try { JSONObject(text) } catch (_: Exception) { return }
-        val id = raw.optString("name_id").ifBlank { raw.optString("id") }
-        if (raw.optBoolean("is_disabled_by_default", false)) { hiddenIds.add(id); publish { entities = entities.filterNot { it.webId == id } }; return }
-        if (id in hiddenIds) return
         val decoded = decodeWebEvent(text) ?: return
-        val (_, name, kind, bool, value, brightness, options) = decoded
-        if (options != null) optionsKnown.add(id)
+        val id = decoded.id
+        if (decoded.hidden) { publish { entities = entities.filterNot { it.webId == id } }; return }
+        if (decoded.options != null) optionsKnown.add(id)
         publish {
             val old = entities.firstOrNull { it.webId == id }
-            val entity = DeviceSession.Entity(old?.key ?: ++nextKey, 0, name, kind, state = bool, value = value, brightness = brightness, supportsBrightness = brightness != null, webId = id, receivedState = true, options = options ?: old?.options.orEmpty())
+            // Options may arrive only once (detail=all); keep them across later state-only events.
+            val platform = if (decoded.platform is Platform.Select && decoded.options == null) (old?.platform as? Platform.Select) ?: decoded.platform else decoded.platform
+            val entity = Entity(old?.key ?: ++nextKey, 0, decoded.name, platform, webId = id, state = decoded.state)
             entities = if (old == null) entities + entity else entities.map { if (it.webId == id) entity else it }
         }
-        if (kind == "select" && options == null && id !in optionsKnown && pendingDetails.add(id)) fetchSelectOptions(id)
+        if (decoded.platform is Platform.Select && decoded.options == null && id !in optionsKnown && pendingDetails.add(id)) fetchSelectOptions(id)
     }
     private fun fetchSelectOptions(id: String) {
         val parts = parseWebId(id) ?: return
@@ -80,29 +80,28 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                     if (source.buffer.size > 65536) return@use
                     val options = decodeWebEvent(source.readUtf8())?.options ?: return@use
                     optionsKnown.add(id)
-                    publish { entities = entities.map { if (it.webId == id) it.copy(options = options) else it } }
+                    publish { entities = entities.map { if (it.webId == id) it.copy(platform = Platform.Select(options)) else it } }
                 }
             } catch (_: Exception) { /* The next state event may retry metadata retrieval. */ }
             finally { pendingDetails.remove(id) }
         }
     }
-    override fun toggle(e: DeviceSession.Entity, value: Boolean) = command(e, if (value) "turn_on" else "turn_off", null)
-    override fun brightness(e: DeviceSession.Entity, value: Float) = command(e, "turn_on", (value.coerceIn(0f, 1f) * 255).toInt())
-    override fun select(e: DeviceSession.Entity, option: String) {
-        if (e.kind != "select" || option !in e.options) return
-        val request = e.webId?.let { createWebSelectCommand(base, it, option) } ?: return
-        executeCommand(request)
-    }
-    private fun command(e: DeviceSession.Entity, action: String, brightness: Int?) {
-        val request = e.webId?.let { createWebCommand(base, it, action, brightness) } ?: return
-        executeCommand(request)
-    }
-    private fun executeCommand(request: Request) {
-        executor.execute {
-            try {
-                client.newCall(request).execute().use { if (!it.isSuccessful) throw IOException("HTTP ${it.code}") }
-            } catch (e: Exception) { publish { status = "Connection failed: ${e.message ?: "network error"}" } }
-        }
+    override fun send(entity: Entity, command: Command) {
+        val id = entity.webId ?: return
+        val request = when (command) {
+            is Command.SetOn -> createWebCommand(base, id, if (command.on) "turn_on" else "turn_off", null)
+            is Command.SetBrightness -> createWebCommand(base, id, "turn_on", (command.brightness.coerceIn(0f, 1f) * 255).toInt())
+            is Command.SelectOption -> if ((entity.platform as? Platform.Select)?.options?.contains(command.option) == true) createWebSelectCommand(base, id, command.option) else null
+            else -> null
+        } ?: return
+        try {
+            executor.execute {
+                try {
+                    client.newCall(request).execute().use { if (!it.isSuccessful) throw IOException("HTTP ${it.code}") }
+                    publish { lastError = null }
+                } catch (e: Exception) { publish { lastError = "Command failed: ${e.message ?: "network error"}" } }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { lastError = "Command failed: not connected" }
     }
     override fun close() { closed = true; stream?.cancel(); client.dispatcher.cancelAll(); executor.shutdownNow() }
 }
@@ -123,20 +122,33 @@ fun createWebClient(username: String?, password: String?): OkHttpClient =
             }
         }.build()
 
-data class WebSnapshot(val id: String, val name: String, val kind: String, val state: Boolean?, val value: String?, val brightness: Float?, val options: List<String>?)
+data class WebSnapshot(val id: String, val name: String, val platform: Platform, val state: EntityState?, val options: List<String>?, val hidden: Boolean = false)
 
 fun decodeWebEvent(text: String): WebSnapshot? {
     val obj = try { JSONObject(text) } catch (_: Exception) { return null }
-    if (obj.optBoolean("is_disabled_by_default", false)) return null
     val id = obj.optString("name_id").ifBlank { obj.optString("id") }
     val parsed = parseWebId(id) ?: return null
-    val kind = when (parsed.first()) { "light" -> "light"; "switch" -> "switch"; "sensor" -> "sensor"; "binary_sensor" -> "binary"; "text_sensor" -> "text"; "select" -> "select"; else -> return null }
+    val domain = parsed.first()
     val name = obj.optString("name").ifBlank { parsed.last() }
-    val state = if (kind == "light" || kind == "switch" || kind == "binary") when (obj.optString("state", obj.optString("value")).uppercase()) { "ON", "TRUE" -> true; "OFF", "FALSE" -> false; else -> null } else null
-    val value = if (kind == "sensor" || kind == "text" || kind == "select") obj.optString("state").takeIf { it.isNotBlank() } else null
-    val brightness = if (kind == "light" && obj.has("brightness")) (obj.optDouble("brightness", Double.NaN) / 255.0).toFloat().takeIf { it.isFinite() && it in 0f..1f } else null
     val options = obj.optJSONArray("option")?.let { array -> (0 until array.length()).mapNotNull { i -> array.opt(i) as? String } }
-    return WebSnapshot(id, name, kind, state, value, brightness, options)
+    if (obj.optBoolean("is_disabled_by_default", false)) return WebSnapshot(id, name, Platform.Unsupported(domain), null, null, hidden = true)
+    fun onOff(): Boolean? = when (obj.optString("state", obj.optString("value")).uppercase()) { "ON", "TRUE" -> true; "OFF", "FALSE" -> false; else -> null }
+    // Sensor states are already formatted by the device, including the unit.
+    val text = obj.optString("state").takeIf { it.isNotBlank() }
+    val platform: Platform; val state: EntityState?
+    when (domain) {
+        "light" -> {
+            val brightness = if (obj.has("brightness")) (obj.optDouble("brightness", Double.NaN) / 255.0).toFloat().takeIf { it.isFinite() && it in 0f..1f } else null
+            platform = Platform.Light(brightness != null); state = onOff()?.let { EntityState.Light(it, brightness) } ?: EntityState.Missing
+        }
+        "switch" -> { platform = Platform.Switch; state = onOff()?.let { EntityState.OnOff(it) } ?: EntityState.Missing }
+        "binary_sensor" -> { platform = Platform.BinarySensor; state = onOff()?.let { EntityState.OnOff(it) } ?: EntityState.Missing }
+        "sensor" -> { platform = Platform.Sensor(); state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
+        "text_sensor" -> { platform = Platform.TextSensor; state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
+        "select" -> { platform = Platform.Select(options.orEmpty()); state = text?.let { EntityState.Text(it) } ?: EntityState.Missing }
+        else -> { platform = Platform.Unsupported(domain.replace('_', ' ').replaceFirstChar { it.uppercase() }); state = null }
+    }
+    return WebSnapshot(id, name, platform, state, options)
 }
 
 fun createWebCommand(base: HttpUrl, id: String, action: String, brightness: Int?): Request? {

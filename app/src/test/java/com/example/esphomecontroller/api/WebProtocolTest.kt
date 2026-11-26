@@ -19,15 +19,19 @@ class WebProtocolTest {
         val buffer = Buffer().writeUtf8("event: log\ndata: ignored\n\nevent: state\ndata: {\"id\":\"switch/Relay\",\"state\":\"ON\"}\n\n")
         val events = mutableListOf<String>()
         assertThrows(EOFException::class.java) { consumeWebEvents(buffer, { false }) { events.add(it) } }
-        assertEquals(1, events.size); assertEquals(true, decodeWebEvent(events.single())?.state)
+        assertEquals(1, events.size); assertEquals(EntityState.OnOff(true), decodeWebEvent(events.single())?.state)
     }
     @Test fun decodesStatesAndAdvertisedBrightness() {
         val light = decodeWebEvent("""{"id":"light/Lamp","state":"ON","brightness":128}""")!!
-        assertEquals("Lamp", light.name); assertEquals(true, light.state); assertEquals(128f / 255f, light.brightness!!, 0.0001f)
+        assertEquals("Lamp", light.name); assertEquals(Platform.Light(true), light.platform)
+        val state = light.state as EntityState.Light
+        assertTrue(state.on); assertEquals(128f / 255f, state.brightness!!, 0.0001f)
         val sensor = decodeWebEvent("""{"id":"sensor-temp","state":"21.4 °C"}""")!!
-        assertEquals("21.4 °C", sensor.value)
-        assertNull(decodeWebEvent("""{"id":"sensor-hidden","is_disabled_by_default":true}"""))
+        assertEquals(EntityState.Text("21.4 °C"), sensor.state)
+        assertTrue(decodeWebEvent("""{"id":"sensor-hidden","is_disabled_by_default":true}""")!!.hidden)
         assertNull(decodeWebEvent("not json"))
+        val cover = decodeWebEvent("""{"id":"cover/Garage door","state":"OPEN"}""")!!
+        assertEquals(Platform.Unsupported("Cover"), cover.platform); assertNull(cover.state)
     }
     @Test fun buildsOnlySupportedCommandsAndEscapesEntityNames() {
         MockWebServer().use { server ->
@@ -43,7 +47,7 @@ class WebProtocolTest {
     }
     @Test fun selectOptionsAndCommandAreEncodedCorrectly() {
         val event = decodeWebEvent("""{"id":"select/Sleep timer","state":"Disabled","option":["Disabled","15 min"]}""")!!
-        assertEquals("select", event.kind); assertEquals("Disabled", event.value); assertEquals(listOf("Disabled", "15 min"), event.options)
+        assertEquals(Platform.Select(listOf("Disabled", "15 min")), event.platform); assertEquals(EntityState.Text("Disabled"), event.state); assertEquals(listOf("Disabled", "15 min"), event.options)
         assertNull(decodeWebEvent("""{"id":"select/Sleep timer","state":"Disabled"}""")!!.options)
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("ok"))

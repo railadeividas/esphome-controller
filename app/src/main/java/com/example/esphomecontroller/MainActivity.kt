@@ -9,13 +9,10 @@ import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
     private val devices = mutableStateMapOf<String, String>()
@@ -27,6 +24,7 @@ class MainActivity : ComponentActivity() {
     private val pending = ArrayDeque<NsdServiceInfo>()
     private val found = mutableSetOf<String>()
     private var resolving = false
+    private lateinit var store: HomeStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +32,7 @@ class MainActivity : ComponentActivity() {
         // The system's three-button contrast scrim would otherwise obscure our themed background.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
-        val store = HomeStore(getSharedPreferences("homes", Context.MODE_PRIVATE))
+        store = HomeStore(getSharedPreferences("homes", Context.MODE_PRIVATE))
         setContent { HomeScreen(store, devices, status, ::restart) }
     }
 
@@ -98,7 +96,12 @@ class MainActivity : ComponentActivity() {
                 override fun onServiceResolved(info: NsdServiceInfo) = runOnUiThread {
                     if (generation == current) {
                         resolving = false
-                        if (found.contains(info.serviceName)) devices[info.serviceName] = "${info.host?.hostAddress ?: "unknown"}:${info.port}"
+                        val host = info.host?.hostAddress
+                        if (found.contains(info.serviceName) && host != null) {
+                            val address = joinAddress(host, info.port)
+                            devices[info.serviceName] = address
+                            store.applyDiscovered(info.serviceName, address)
+                        }
                         resolveNext(current)
                     }
                 }

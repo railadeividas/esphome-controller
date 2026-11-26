@@ -6,83 +6,119 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.example.esphomecontroller.proto.Api
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
+/** A live connection to one device. All observable state is published on the main thread. */
 interface ControlSession : AutoCloseable {
-    val status: String
-    val entities: List<DeviceSession.Entity>
-    fun toggle(e: DeviceSession.Entity, value: Boolean)
-    fun brightness(e: DeviceSession.Entity, value: Float)
-    fun select(e: DeviceSession.Entity, option: String)
+    val connection: ConnectionState
+    val entities: List<Entity>
+    val details: DeviceDetails?
+    /** The last command failure; does not by itself mean the connection is down. */
+    val lastError: String?
+    fun send(entity: Entity, command: Command)
 }
 
-/** Native API session; all UI state is published on the main thread. */
+val ControlSession?.isConnected: Boolean get() = this?.connection is ConnectionState.Connected
+
+/** Native API session over plaintext or Noise framing. Encryption is never downgraded. */
 class DeviceSession(private val host: String, private val port: Int, private val key: ByteArray?) : ControlSession {
-    data class Entity(val key: Int, val deviceId: Int, val name: String, val kind: String, val unit: String = "", val state: Boolean? = null, val value: String? = null, val brightness: Float? = null, val supportsBrightness: Boolean = false, val webId: String? = null, val receivedState: Boolean = false, val options: List<String> = emptyList())
-    override var status by mutableStateOf("Connecting…"); private set
+    override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
+    override var details by mutableStateOf<DeviceDetails?>(null); private set
+    override var lastError by mutableStateOf<String?>(null); private set
     private val ui = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
+    /** Serialises writes (commands and keepalive pings) off the main thread. */
+    private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "esphome-writer") }
     @Volatile private var socket: Socket? = null
     @Volatile private var frames: FrameConnection? = null
     @Volatile private var closed = false
+    @Volatile private var lastReceived = 0L
     init { Thread({ run() }, "esphome-session").start() }
+
     private fun publish(block: () -> Unit) { ui.post { if (!closed) block() } }
+
     private fun run() {
         try {
-            val s = Socket(); socket = s; if (closed) { s.close(); return }; s.connect(InetSocketAddress(host, port), 8000); s.soTimeout = 90000
-            val f = if (key != null) NoiseFrames(s.getInputStream(), s.getOutputStream(), key) else PlaintextConnection(s.getInputStream(), s.getOutputStream()); frames = f; key?.fill(0)
-            send(1, Api.HelloRequest.newBuilder().setClientInfo("ESPHome Controller").setApiVersionMajor(1).setApiVersionMinor(19).build().toByteArray())
-            send(3, Api.AuthenticationRequest.getDefaultInstance().toByteArray())
+            val s = Socket(); socket = s
+            if (closed) { s.close(); return }
+            s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+            s.soTimeout = READ_TIMEOUT_MS
+            val f = if (key != null) NoiseFrames(s.getInputStream(), s.getOutputStream(), key) else PlaintextConnection(s.getInputStream(), s.getOutputStream())
+            frames = f; key?.fill(0)
+            send(MessageType.HELLO_REQUEST, Api.HelloRequest.newBuilder().setClientInfo("ESPHome Controller").setApiVersionMajor(1).setApiVersionMinor(19).build().toByteArray())
+            // Required by firmware before 2026.1; newer firmware ignores it.
+            send(MessageType.AUTHENTICATION_REQUEST, Api.AuthenticationRequest.getDefaultInstance().toByteArray())
             while (!closed) {
                 val frame = f.read()
-                when (frame.type) {
-                    2 -> { val hello = Api.HelloResponse.parseFrom(frame.payload); if (hello.apiVersionMajor > 2) throw IllegalStateException("Unsupported API version"); send(11, byteArrayOf()); send(20, byteArrayOf()); publish { status = if (key == null) "Connected without encryption" else "Connected securely" } }
-                    4 -> if (Api.AuthenticationResponse.parseFrom(frame.payload).invalidPassword) throw IllegalStateException("Device requires legacy password authentication")
-                    5 -> { send(6, byteArrayOf()); throw IllegalStateException("Device closed connection") }
-                    7 -> send(8, byteArrayOf())
-                    12 -> Api.ListEntitiesBinarySensorResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "binary")) }
-                    15 -> Api.ListEntitiesLightResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "light", supportsBrightness = p.legacySupportsBrightness || p.supportedColorModesValueList.any { (it and 2) != 0 })) }
-                    16 -> Api.ListEntitiesSensorResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "sensor", p.unitOfMeasurement)) }
-                    17 -> Api.ListEntitiesSwitchResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "switch")) }
-                    18 -> Api.ListEntitiesTextSensorResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "text")) }
-                    52 -> Api.ListEntitiesSelectResponse.parseFrom(frame.payload).let { p -> if (!p.disabledByDefault) add(Entity(p.key, p.deviceId, p.name.ifBlank { p.objectId }, "select", options = p.optionsList.toList())) }
-                    53 -> Api.SelectStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(value = if (p.missingState) null else p.state, receivedState = true) } }
-                    21 -> Api.BinarySensorStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(state = if (p.missingState) null else p.state, receivedState = true) } }
-                    24 -> Api.LightStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(state = p.state, brightness = p.brightness, receivedState = true) } }
-                    25 -> Api.SensorStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(value = if (p.missingState) null else p.state.toString(), receivedState = true) } }
-                    26 -> Api.SwitchStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(state = if (p.missingState) null else p.state, receivedState = true) } }
-                    27 -> Api.TextSensorStateResponse.parseFrom(frame.payload).let { p -> update(p.key, p.deviceId) { it.copy(value = if (p.missingState) null else p.state, receivedState = true) } }
+                lastReceived = System.nanoTime()
+                when (val event = decodeNativeFrame(frame)) {
+                    is NativeEvent.Hello -> {
+                        if (event.apiMajor != 1) throw IOException("Unsupported API version ${event.apiMajor}.${event.apiMinor}")
+                        send(MessageType.DEVICE_INFO_REQUEST, byteArrayOf())
+                        send(MessageType.LIST_ENTITIES_REQUEST, byteArrayOf())
+                        startKeepalive()
+                        publish { connection = ConnectionState.Connected(if (key == null) Security.UNENCRYPTED else Security.ENCRYPTED) }
+                    }
+                    NativeEvent.AuthenticationRejected -> throw IOException("Device requires legacy password authentication, which is not supported")
+                    NativeEvent.DisconnectRequested -> { send(MessageType.DISCONNECT_RESPONSE, byteArrayOf()); throw IOException("Device closed the connection") }
+                    NativeEvent.PingRequested -> send(MessageType.PING_RESPONSE, byteArrayOf())
+                    is NativeEvent.Info -> publish { details = event.details }
+                    is NativeEvent.EntityListed -> publish { entities = entities.filterNot { sameEntity(it, event.entity) } + event.entity }
+                    // Subscribe only after the entity list so that no initial state arrives before its entity.
+                    NativeEvent.EntitiesDone -> send(MessageType.SUBSCRIBE_STATES_REQUEST, byteArrayOf())
+                    is NativeEvent.StateChanged -> publish { entities = applyState(entities, event) }
+                    NativeEvent.Ignored -> Unit
                 }
             }
-        } catch (e: Exception) { publish { status = "Connection failed: ${e.message ?: e.javaClass.simpleName}" } }
-        finally { key?.fill(0); try { frames?.close() } catch (_: Exception) {}; try { socket?.close() } catch (_: Exception) {}; frames = null }
-    }
-    private fun add(entity: Entity) = publish { entities = entities.filterNot { it.key == entity.key && it.deviceId == entity.deviceId } + entity }
-    private fun update(key: Int, device: Int, change: (Entity) -> Entity) = publish { entities = entities.map { if (it.key == key && it.deviceId == device) change(it) else it } }
-    private fun send(type: Int, payload: ByteArray) { (frames ?: throw IllegalStateException("Not connected")).write(ApiFrame(type, payload)) }
-    override fun toggle(e: Entity, value: Boolean) { worker.execute { try {
-        when (e.kind) {
-            "light" -> send(32, Api.LightCommandRequest.newBuilder().setKey(e.key).setDeviceId(e.deviceId).setHasState(true).setState(value).build().toByteArray())
-            "switch" -> send(33, Api.SwitchCommandRequest.newBuilder().setKey(e.key).setDeviceId(e.deviceId).setState(value).build().toByteArray())
+        } catch (e: Exception) {
+            val reason = if (e is java.net.SocketTimeoutException) "Device stopped responding" else e.message ?: e.javaClass.simpleName
+            publish { connection = ConnectionState.Failed(reason) }
+        } finally {
+            key?.fill(0)
+            try { frames?.close() } catch (_: Exception) {}
+            try { socket?.close() } catch (_: Exception) {}
+            frames = null
+            worker.shutdownNow()
         }
-    } catch (ex: Exception) { publish { status = "Command failed: ${ex.message}" } } } }
-    override fun brightness(e: Entity, value: Float) { worker.execute { try {
-        send(32, Api.LightCommandRequest.newBuilder().setKey(e.key).setDeviceId(e.deviceId).setHasBrightness(true).setBrightness(value).build().toByteArray())
-    } catch (ex: Exception) { publish { status = "Command failed: ${ex.message}" } } } }
-    override fun select(e: Entity, option: String) {
-        val frame = createNativeSelectCommand(e, option) ?: return
-        worker.execute { try {
-            send(frame.type, frame.payload)
-        } catch (ex: Exception) { publish { status = "Command failed: ${ex.message}" } } }
     }
-    override fun close() { closed = true; key?.fill(0); try { socket?.close() } catch (_: Exception) {}; worker.shutdownNow() }
+
+    /** Ping when idle so that dead links are detected well within the read timeout. */
+    private fun startKeepalive() {
+        worker.scheduleWithFixedDelay({
+            if (System.nanoTime() - lastReceived > TimeUnit.MILLISECONDS.toNanos(PING_INTERVAL_MS)) {
+                try { send(MessageType.PING_REQUEST, byteArrayOf()) } catch (_: Exception) { try { socket?.close() } catch (_: Exception) {} }
+            }
+        }, PING_INTERVAL_MS, PING_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun send(type: Int, payload: ByteArray) { (frames ?: throw IOException("Not connected")).write(ApiFrame(type, payload)) }
+
+    override fun send(entity: Entity, command: Command) {
+        val frame = nativeCommand(entity, command) ?: return
+        try {
+            worker.execute {
+                try { send(frame.type, frame.payload); publish { lastError = null } }
+                catch (e: Exception) { publish { lastError = "Command failed: ${e.message ?: e.javaClass.simpleName}" } }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { lastError = "Command failed: not connected" }
+    }
+
+    override fun close() {
+        closed = true; key?.fill(0)
+        try { socket?.close() } catch (_: Exception) {}
+        worker.shutdownNow()
+    }
+
+    companion object {
+        const val CONNECT_TIMEOUT_MS = 8_000
+        const val READ_TIMEOUT_MS = 60_000
+        const val PING_INTERVAL_MS = 20_000L
+    }
 }
 
-fun createNativeSelectCommand(entity: DeviceSession.Entity, option: String): ApiFrame? {
-    if (entity.kind != "select" || option !in entity.options) return null
-    val payload = Api.SelectCommandRequest.newBuilder().setKey(entity.key).setDeviceId(entity.deviceId).setState(option).build().toByteArray()
-    return ApiFrame(54, payload)
-}
+fun applyState(entities: List<Entity>, event: NativeEvent.StateChanged): List<Entity> =
+    entities.map { if (it.webId == null && it.key == event.key && it.deviceId == event.deviceId) it.copy(state = event.state) else it }
