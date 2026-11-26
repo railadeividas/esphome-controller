@@ -18,12 +18,29 @@ interface ControlSession : AutoCloseable {
     val entities: List<Entity>
     val details: DeviceDetails?
     /** The last command failure; does not by itself mean the connection is down. */
-    val lastError: String?
+    val lastError: CommandError?
     fun send(entity: Entity, command: Command)
+    /** Re-sends the command behind [lastError] to the current copy of its entity, if it is still ready. */
+    fun retryFailed()
     /** Recent device log lines, newest last; kept in memory only and only after [subscribeLogs]. */
     val logs: List<String>
     /** Starts receiving device logs on this connection. Logs may contain network details; never persist them. */
     fun subscribeLogs()
+}
+
+/** A failed command. [serial] is unique across sessions so each failure is reported once. */
+data class CommandError(val message: String, val serial: Long = nextErrorSerial.incrementAndGet())
+private val nextErrorSerial = java.util.concurrent.atomic.AtomicLong()
+
+/** Remembers the last failed command so it can be retried against the live entity. */
+internal class FailedCommand {
+    @Volatile var entity: Entity? = null; @Volatile var command: Command? = null
+    fun set(e: Entity, c: Command) { entity = e; command = c }
+    fun retry(entities: List<Entity>, connected: Boolean, send: (Entity, Command) -> Unit) {
+        val e = entity ?: return; val c = command ?: return
+        val live = entities.firstOrNull { sameEntity(it, e) } ?: return
+        if (isCommandReady(connected, live)) send(live, c)
+    }
 }
 
 const val MAX_LOG_LINES = 300
@@ -42,7 +59,8 @@ class DeviceSession(private val host: String, private val port: Int, private val
     override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override var details by mutableStateOf<DeviceDetails?>(null); private set
-    override var lastError by mutableStateOf<String?>(null); private set
+    override var lastError by mutableStateOf<CommandError?>(null); private set
+    private val failed = FailedCommand()
     override var logs by mutableStateOf<List<String>>(emptyList()); private set
     @Volatile private var logsWanted = false
     private val ui = Handler(Looper.getMainLooper())
@@ -121,16 +139,18 @@ class DeviceSession(private val host: String, private val port: Int, private val
         try {
             worker.execute {
                 try { send(frame.type, frame.payload); publish { lastError = null } }
-                catch (e: Exception) { publish { lastError = "Command failed: ${e.message ?: e.javaClass.simpleName}" } }
+                catch (e: Exception) { failed.set(entity, command); publish { lastError = CommandError("${entity.name}: command failed (${e.message ?: e.javaClass.simpleName})") } }
             }
-        } catch (_: java.util.concurrent.RejectedExecutionException) { lastError = "Command failed: not connected" }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { failed.set(entity, command); lastError = CommandError("${entity.name}: not connected") }
     }
+
+    override fun retryFailed() = failed.retry(entities, connection is ConnectionState.Connected, ::send)
 
     override fun subscribeLogs() {
         if (logsWanted) return
         logsWanted = true
         try {
-            worker.execute { try { subscribeLogsFrame().let { send(it.type, it.payload) } } catch (e: Exception) { logsWanted = false; publish { lastError = "Could not subscribe to logs: ${e.message}" } } }
+            worker.execute { try { subscribeLogsFrame().let { send(it.type, it.payload) } } catch (e: Exception) { logsWanted = false; publish { lastError = CommandError("Could not subscribe to logs: ${e.message}") } } }
         } catch (_: java.util.concurrent.RejectedExecutionException) { logsWanted = false }
     }
 

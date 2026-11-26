@@ -1,6 +1,9 @@
 package com.example.esphomecontroller
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,25 +41,75 @@ private fun Platform.icon(): ImageVector = when (this) {
     is Platform.Unsupported -> Icons.AutoMirrored.Filled.HelpOutline
 }
 
+/** Icon from the advertised icon or device_class, falling back to the platform icon. */
+fun entityIcon(entity: Entity): ImageVector {
+    val mdi = entity.icon.removePrefix("mdi:").lowercase()
+    val byIcon = when {
+        mdi.isEmpty() -> null
+        "thermometer" in mdi || "thermostat" in mdi -> Icons.Default.Thermostat
+        "water-percent" in mdi || "humidity" in mdi || mdi == "water" -> Icons.Default.WaterDrop
+        "wifi" in mdi || "signal" in mdi -> Icons.Default.Wifi
+        "restart" in mdi || "reload" in mdi || "refresh" in mdi -> Icons.Default.RestartAlt
+        "weather-sun" in mdi || "sun" in mdi -> Icons.Default.WbSunny
+        "timer" in mdi || "clock" in mdi || "history" in mdi -> Icons.Default.Schedule
+        "flash" in mdi || "lightning" in mdi || "power-plug" in mdi -> Icons.Default.Bolt
+        "battery" in mdi -> Icons.Default.BatteryFull
+        "door" in mdi -> Icons.Default.SensorDoor
+        "window" in mdi -> Icons.Default.Window
+        "motion" in mdi || "walk" in mdi || "run" in mdi -> Icons.Default.DirectionsWalk
+        "gauge" in mdi || "speed" in mdi -> Icons.Default.Speed
+        "lightbulb" in mdi || "lamp" in mdi -> Icons.Default.Lightbulb
+        "fan" in mdi -> Icons.Default.Air
+        else -> null
+    }
+    if (byIcon != null) return byIcon
+    val byClass = when (entity.deviceClass.lowercase()) {
+        "" -> null
+        "temperature" -> Icons.Default.Thermostat
+        "humidity", "moisture" -> Icons.Default.WaterDrop
+        "signal_strength", "connectivity" -> Icons.Default.Wifi
+        "power", "energy", "voltage", "current", "plug" -> Icons.Default.Bolt
+        "battery", "battery_charging" -> Icons.Default.BatteryFull
+        "illuminance", "light" -> Icons.Default.LightMode
+        "pressure" -> Icons.Default.Speed
+        "duration", "timestamp", "date" -> Icons.Default.Schedule
+        "carbon_dioxide", "pm25", "pm10", "volatile_organic_compounds", "gas" -> Icons.Default.Air
+        "door", "garage_door", "opening" -> Icons.Default.SensorDoor
+        "window" -> Icons.Default.Window
+        "motion", "occupancy", "presence", "moving" -> Icons.Default.DirectionsWalk
+        "smoke", "heat" -> Icons.Default.LocalFireDepartment
+        "problem", "safety", "tamper" -> Icons.Default.Warning
+        "lock" -> Icons.Default.Lock
+        "restart" -> Icons.Default.RestartAlt
+        "update", "firmware" -> Icons.Default.SystemUpdate
+        else -> null
+    }
+    return byClass ?: entity.platform.icon()
+}
+
 private val Platform.isToggle get() = this is Platform.Light || this == Platform.Switch || this is Platform.Fan
 /** Platforms whose current value is shown as text next to the icon or name. */
-private val Platform.showsValue get() = this is Platform.Sensor || this == Platform.BinarySensor || this == Platform.TextSensor ||
-    this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
+private val Platform.showsValue get() = isReadOnly || this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
 
 /** Wraps a send so that only the live (current-connection) entity is ever commanded. */
 private class Sender(val session: ControlSession?, val live: Entity?, val ready: Boolean) {
     operator fun invoke(command: Command) { if (ready && live != null) session?.send(live, command) }
 }
 
-/** Dashboard tile. [entity] may be cached; [live] is the current connection's copy and gates commands. */
+/**
+ * Dashboard tile. [entity] may be cached; [live] is the current connection's copy and gates commands.
+ * [onOpen] (long-press or tapping the name) opens the full controls; [overlay] draws edit-mode tools.
+ */
 @Composable
-fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier) {
+fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null) {
     val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
-    Card(modifier.heightIn(min = 142.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+    val gestures = if (onOpen == null) Modifier else Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) }
+    Card(modifier.heightIn(min = 142.dp).then(gestures), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+      Box {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Icon(p.icon(), contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
                 if (p.isToggle) {
                     Spacer(Modifier.weight(1f))
                     PowerButton(entity, live, send)
@@ -65,7 +118,8 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
                     Text(displayValue(entity) ?: "—", textAlign = TextAlign.End, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 }
             }
-            Text(entity.name, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+            Text(entity.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, modifier = if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             when (p) {
                 is Platform.Light -> if (p.supportsBrightness && (entity.state as? EntityState.Light)?.brightness != null) BrightnessSlider(entity, send) else Caption(onOffText(entity))
                 Platform.Switch -> Caption(onOffText(entity))
@@ -81,16 +135,39 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
                 else -> Unit
             }
         }
+        overlay?.invoke(this)
+      }
+    }
+}
+
+/** Compact row for read-only values (sensors, binary and text sensors) in the dashboard's list card. */
+@Composable
+fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(entity.name, style = MaterialTheme.typography.bodyMedium)
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Text(displayValue(entity) ?: "—", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
+        trailing?.invoke()
     }
 }
 
 /** Device page row: name on the left, value or main control on the right, secondary controls below. */
 @Composable
 fun EntityDetailRow(entity: Entity, session: ControlSession?, live: Entity?) {
+    Card(Modifier.fillMaxWidth()) { EntityControls(entity, session, live, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+}
+
+/** All controls an entity advertises: used on the device page and in the dashboard's bottom sheet. */
+@Composable
+fun EntityControls(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier) {
     val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    run {
+        Column(Modifier.fillMaxWidth().then(modifier), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(entity.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 when (p) {
@@ -158,7 +235,11 @@ private fun PowerButton(entity: Entity, live: Entity?, send: Sender) {
 private fun BrightnessSlider(entity: Entity, send: Sender) {
     val brightness = (entity.state as? EntityState.Light)?.brightness ?: return
     var slider by remember(entity.stableId, brightness) { mutableFloatStateOf(brightness.coerceIn(0f, 1f)) }
-    Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.fillMaxWidth())
+    val on = isOn(entity.state) == true
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.weight(1f))
+        Text(if (on) "${Math.round(slider * 100)}%" else "Off", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.width(40.dp))
+    }
 }
 
 /** A slider that sends only when released, showing a percentage. */

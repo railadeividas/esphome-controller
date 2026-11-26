@@ -14,11 +14,14 @@ class HomeStore(private val prefs: SharedPreferences) {
     data class Device(val id: String, val name: String, val address: String, val mode: String? = null, val followDiscovery: Boolean = !id.startsWith("manual:")) {
         val isWeb get() = mode == "web" || mode == "web_auth"
     }
-    data class Home(val id: String, val name: String, val devices: List<Device> = emptyList())
+    /** Dashboard layout for one home. Entity keys come from [entityKey]; section keys are device ids or [FAVOURITES]. */
+    data class Layout(val pinned: List<String> = emptyList(), val hidden: Set<String> = emptySet(), val collapsed: Set<String> = emptySet())
+    /** [devices] order is also the dashboard section order. */
+    data class Home(val id: String, val name: String, val devices: List<Device> = emptyList(), val layout: Layout = Layout())
 
     var theme by mutableStateOf(prefs.getString("theme", "system")?.takeIf { it in THEMES } ?: "system"); private set
     /** Show configuration and diagnostic entities on the dashboard as well as on the device page. */
-    var showAllEntities by mutableStateOf(prefs.getBoolean("showAllEntities", false)); private set
+    var showAllEntities by mutableStateOf(prefs.getBoolean("showAllEntities", true)); private set
     var homes by mutableStateOf(load()); private set
     var selected by mutableStateOf(prefs.getString("selected", null) ?: homes.first().id); private set
     init { if (homes.none { it.id == selected }) selected = homes.first().id }
@@ -32,9 +35,10 @@ class HomeStore(private val prefs: SharedPreferences) {
         val arr = JSONArray(prefs.getString("homes", "[]"))
         (0 until arr.length()).map { i ->
             val obj = arr.getJSONObject(i); val ds = obj.getJSONArray("devices")
+            fun strings(key: String) = obj.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
             Home(obj.getString("id"), obj.getString("name"), (0 until ds.length()).map { j ->
                 ds.getJSONObject(j).let { Device(it.getString("id"), it.getString("name"), it.getString("address"), it.optString("mode").takeIf { mode -> mode in MODES }, it.optBoolean("followDiscovery", !it.getString("id").startsWith("manual:"))) }
-            })
+            }, Layout(strings("pinned"), strings("hidden").toSet(), strings("collapsed").toSet()))
         }.ifEmpty { listOf(Home(UUID.randomUUID().toString(), "My home")) }
     } catch (_: Exception) { listOf(Home(UUID.randomUUID().toString(), "My home")) }
 
@@ -43,7 +47,8 @@ class HomeStore(private val prefs: SharedPreferences) {
         homes.forEach { h ->
             val ds = JSONArray()
             h.devices.forEach { d -> ds.put(JSONObject().put("id", d.id).put("name", d.name).put("address", d.address).put("mode", d.mode).put("followDiscovery", d.followDiscovery)) }
-            arr.put(JSONObject().put("id", h.id).put("name", h.name).put("devices", ds))
+            arr.put(JSONObject().put("id", h.id).put("name", h.name).put("devices", ds)
+                .put("pinned", JSONArray(h.layout.pinned)).put("hidden", JSONArray(h.layout.hidden.toList())).put("collapsed", JSONArray(h.layout.collapsed.toList())))
         }
         prefs.edit().putString("homes", arr.toString()).putString("selected", selected).apply()
     }
@@ -55,7 +60,28 @@ class HomeStore(private val prefs: SharedPreferences) {
         homes = homes.map { h -> if (h.id != selected) h else h.copy(devices = if (h.devices.any { it.id == device.id }) h.devices.map { if (it.id == device.id) device else it } else h.devices + device) }
         save()
     }
-    fun removeDevice(id: String) { homes = homes.map { if (it.id == selected) it.copy(devices = it.devices.filterNot { d -> d.id == id }) else it }; save() }
+    fun removeDevice(id: String) {
+        val prefix = "$id|"
+        homes = homes.map { h ->
+            if (h.id != selected) h
+            else h.copy(devices = h.devices.filterNot { d -> d.id == id }, layout = h.layout.copy(
+                pinned = h.layout.pinned.filterNot { it.startsWith(prefix) }, hidden = h.layout.hidden.filterNot { it.startsWith(prefix) }.toSet(), collapsed = h.layout.collapsed - id))
+        }
+        save()
+    }
+    private fun updateLayout(change: (Layout) -> Layout) { homes = homes.map { if (it.id == selected) it.copy(layout = change(it.layout)) else it }; save() }
+    fun togglePinned(key: String) = updateLayout { l -> l.copy(pinned = if (key in l.pinned) l.pinned - key else l.pinned + key) }
+    fun toggleHidden(key: String) = updateLayout { l -> l.copy(hidden = if (key in l.hidden) l.hidden - key else l.hidden + key) }
+    fun toggleCollapsed(section: String) = updateLayout { l -> l.copy(collapsed = if (section in l.collapsed) l.collapsed - section else l.collapsed + section) }
+    /** Moves a device section up (-1) or down (+1) on the dashboard. */
+    fun moveDevice(id: String, delta: Int) {
+        homes = homes.map { h ->
+            if (h.id != selected) return@map h
+            val i = h.devices.indexOfFirst { it.id == id }; val j = i + delta
+            if (i < 0 || j !in h.devices.indices) h else h.copy(devices = h.devices.toMutableList().apply { add(j, removeAt(i)) })
+        }
+        save()
+    }
     fun isDeviceInAnyHome(id: String) = homes.any { h -> h.devices.any { it.id == id } }
 
     /**
@@ -77,6 +103,9 @@ class HomeStore(private val prefs: SharedPreferences) {
     }
 
     companion object {
+        const val FAVOURITES = "favourites"
+        /** Stable layout key for an entity of a device in this home. */
+        fun entityKey(deviceId: String, stableId: String) = "$deviceId|$stableId"
         val THEMES = listOf("system", "light", "dark")
         val MODES = listOf("encrypted", "plain", "web", "web_auth")
     }

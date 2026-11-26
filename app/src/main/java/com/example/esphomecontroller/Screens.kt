@@ -22,11 +22,25 @@ import androidx.compose.ui.unit.dp
 import com.example.esphomecontroller.api.*
 import java.util.UUID
 
-fun connectionSummary(session: ControlSession?, setupError: String?): String = setupError ?: when (session?.connection) {
+fun connectionSummary(session: ControlSession?, setupError: String?, lastSeen: Long? = null, now: Long = System.currentTimeMillis()): String = setupError ?: when (session?.connection) {
     null, ConnectionState.Connecting -> "Connecting…"
     is ConnectionState.Connected -> "Connected"
-    is ConnectionState.Failed -> "Connection unavailable · retrying"
+    is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, now)}" } ?: "")
 }
+
+/** "just now", "5 min ago", "3 h ago", "2 d ago". */
+fun relativeTime(then: Long, now: Long): String {
+    val seconds = ((now - then) / 1000).coerceAtLeast(0)
+    return when {
+        seconds < 60 -> "just now"
+        seconds < 3600 -> "${seconds / 60} min ago"
+        seconds < 86_400 -> "${seconds / 3600} h ago"
+        else -> "${seconds / 86_400} d ago"
+    }
+}
+
+/** A device whose connection dropped and is being retried; setup problems are shown separately. */
+val ControlSession?.isOffline: Boolean get() = (this?.connection as? ConnectionState.Failed)?.needsSetup == false
 
 private fun connectionDetail(session: ControlSession?, setupError: String?): String = setupError ?: when (val c = session?.connection) {
     null -> "Not connected"
@@ -40,7 +54,7 @@ private fun securityLabel(device: HomeStore.Device): String = when (device.mode)
 }
 
 @Composable
-private fun StatusDot(connected: Boolean) =
+fun StatusDot(connected: Boolean) =
     Box(Modifier.size(10.dp).background(if (connected) Color(0xFF36A76B) else Color(0xFFAAA7B2), CircleShape))
 
 /** Connection and firmware information shared by the info dialog and the device page. */
@@ -54,53 +68,7 @@ fun DeviceInfoLines(device: HomeStore.Device, session: ControlSession?, setupErr
         listOf("Model" to d.model, "Manufacturer" to d.manufacturer, "ESPHome" to d.esphomeVersion, "Project" to d.project)
             .filter { it.second.isNotBlank() }.forEach { (label, value) -> Text("$label: $value") }
     }
-    session?.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-}
-
-@Composable
-fun DashboardScreen(store: HomeStore, manager: ConnectionManager, onManageHomes: () -> Unit, onAdd: () -> Unit, onInfo: (HomeStore.Device) -> Unit, onSetup: (HomeStore.Device) -> Unit) {
-    val home = store.home
-    var homesExpanded by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) {
-            TextButton(onClick = { homesExpanded = true }) { Text("${home.name} ▾", style = MaterialTheme.typography.titleMedium) }
-            DropdownMenu(expanded = homesExpanded, onDismissRequest = { homesExpanded = false }) {
-                store.homes.forEach { h -> DropdownMenuItem(text = { Text(h.name) }, onClick = { store.select(h.id); homesExpanded = false }) }
-                DropdownMenuItem(text = { Text("Manage homes") }, onClick = { homesExpanded = false; onManageHomes() })
-            }
-        }
-        Text("${home.devices.size} devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add device") }
-    }
-    if (home.devices.isEmpty()) Text("Your home is ready. Add a device to get started.")
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        items(home.devices, key = { it.id }) { d ->
-            val session = manager.sessions[d.id]
-            val setupError = manager.setupErrors[d.id]
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(session.isConnected)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        Text(connectionSummary(session, setupError), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = { onInfo(d) }) { Icon(Icons.Default.Info, contentDescription = "Device information") }
-                }
-                val live = session?.entities.orEmpty()
-                val entities = manager.entities(home.id, d.id).filter { store.showAllEntities || it.category == EntityCategory.NONE }
-                entities.chunked(2).forEach { pair ->
-                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        pair.forEach { entity -> EntityTile(entity, session, live.firstOrNull { sameEntity(it, entity) }, Modifier.weight(1f).fillMaxHeight()) }
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
-                    }
-                }
-                if (entities.isEmpty()) Text(if (session.isConnected) "Waiting for device states…" else "—", style = MaterialTheme.typography.bodySmall)
-                session?.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                if (setupError != null) TextButton(onClick = { onSetup(d) }) { Text("Fix connection settings") }
-            }
-        }
-    }
+    session?.lastError?.let { Text(it.message, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable
@@ -165,7 +133,7 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        Text(connectionSummary(session, manager.setupErrors[d.id]), style = MaterialTheme.typography.bodySmall)
+                        Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall)
                     }
                     Text("View", color = MaterialTheme.colorScheme.primary)
                 }

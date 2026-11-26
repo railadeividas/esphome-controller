@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -20,6 +21,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.flow.collectLatest
 
 private enum class Page { HOME, DEVICES, DISCOVER, SETTINGS }
 
@@ -55,8 +57,20 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
 
     fun edit(device: HomeStore.Device, new: Boolean) { editing = device; isNew = new }
 
+    // Command failures appear once each as a snackbar with Retry.
+    val snackbar = remember { SnackbarHostState() }
+    val reported = remember { mutableSetOf<Long>() }
+    LaunchedEffect(manager) {
+        snapshotFlow { manager.sessions.mapNotNull { (id, s) -> s.lastError?.let { id to it } } }.collectLatest { errors ->
+            val (deviceId, error) = errors.filter { it.second.serial !in reported }.maxByOrNull { it.second.serial } ?: return@collectLatest
+            reported += error.serial
+            if (snackbar.showSnackbar(error.message, actionLabel = "Retry", withDismissAction = true) == SnackbarResult.ActionPerformed) manager.sessions[deviceId]?.retryFailed()
+        }
+    }
+
     MaterialTheme(colorScheme = colors) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Spacer(Modifier.height(6.dp))
                 Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -85,6 +99,8 @@ fun HomeScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, scan
                     }
                 }
             }
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
+          }
         }
         details?.let { id -> home.devices.find { it.id == id }?.let { d ->
             AlertDialog(

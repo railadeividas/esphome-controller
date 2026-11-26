@@ -38,6 +38,9 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
     /** Incremented when a device that follows discovery cannot be reached, so the UI can scan for its new address. */
     var discoveryRequests by mutableIntStateOf(0); private set
     private var lastDiscoveryRequest = 0L
+    /** Wall-clock time each device was last seen connected, in memory only. */
+    private val lastSeen = mutableMapOf<String, Long>()
+    fun lastSeen(deviceId: String): Long? = lastSeen[deviceId]
 
     private data class Target(val homeId: String, val device: HomeStore.Device)
     private val targets = mutableMapOf<String, Target>()
@@ -121,7 +124,7 @@ class ConnectionManager(app: Application) : AndroidViewModel(app) {
             }
             if (id in setupErrors) continue
             when (session?.connection) {
-                is ConnectionState.Connected -> { attempts.remove(id); continue }
+                is ConnectionState.Connected -> { attempts.remove(id); lastSeen[id] = System.currentTimeMillis(); continue }
                 ConnectionState.Connecting -> continue
                 else -> Unit
             }

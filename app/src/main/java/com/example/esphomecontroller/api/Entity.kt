@@ -88,6 +88,10 @@ data class Entity(
     val webId: String? = null,
     /** null until the current connection reports a state. */
     val state: EntityState? = null,
+    /** Advertised device_class (e.g. "door", "temperature"); empty when unknown. */
+    val deviceClass: String = "",
+    /** Advertised icon, usually "mdi:<name>"; empty when unknown. */
+    val icon: String = "",
 ) {
     val stableId: String get() = webId ?: "${platform.id}:$deviceId:$key"
 }
@@ -184,7 +188,7 @@ fun displayValue(entity: Entity, locale: Locale = Locale.getDefault()): String? 
     val p = entity.platform
     val text = when (state) {
         EntityState.Missing -> return null
-        is EntityState.OnOff -> if (state.on) "On" else "Off"
+        is EntityState.OnOff -> if (p == Platform.BinarySensor) binaryStateText(state.on, entity.deviceClass) else if (state.on) "On" else "Off"
         is EntityState.Light -> if (state.on) "On" else "Off"
         is EntityState.Text -> state.value
         is EntityState.Fan -> if (!state.on) "Off" else if (p is Platform.Fan && p.speedCount > 0) "On · ${state.speedLevel}/${p.speedCount}" else "On"
@@ -246,3 +250,31 @@ fun miredsToKelvin(mireds: Float): Int = if (mireds > 0f) Math.round(1_000_000f 
 /** Rounds a target temperature to the advertised step within the visual range. */
 fun snapTemperature(value: Float, p: Platform.Climate): Float =
     snapToStep(value, Platform.Number(p.minTemperature, p.maxTemperature, if (p.step > 0f) p.step else 0.5f))
+
+/** State words for a binary sensor's device_class (Home Assistant conventions); On/Off when unknown. */
+fun binaryStateText(on: Boolean, deviceClass: String): String {
+    val (onText, offText) = when (deviceClass.lowercase()) {
+        "door", "garage_door", "opening", "window" -> "Open" to "Closed"
+        "motion", "occupancy", "presence", "sound", "vibration", "smoke", "gas", "carbon_monoxide", "tamper" -> "Detected" to "Clear"
+        "moisture" -> "Wet" to "Dry"
+        "lock" -> "Unlocked" to "Locked"
+        "battery" -> "Low" to "Normal"
+        "battery_charging" -> "Charging" to "Not charging"
+        "cold" -> "Cold" to "Normal"
+        "heat" -> "Hot" to "Normal"
+        "connectivity" -> "Connected" to "Disconnected"
+        "light" -> "Light" to "Dark"
+        "moving" -> "Moving" to "Stopped"
+        "plug" -> "Plugged in" to "Unplugged"
+        "power" -> "Power" to "No power"
+        "problem" -> "Problem" to "OK"
+        "running" -> "Running" to "Not running"
+        "safety" -> "Unsafe" to "Safe"
+        "update" -> "Update available" to "Up to date"
+        else -> "On" to "Off"
+    }
+    return if (on) onText else offText
+}
+
+/** Read-only platforms are listed compactly instead of as control tiles. */
+val Platform.isReadOnly: Boolean get() = this is Platform.Sensor || this == Platform.BinarySensor || this == Platform.TextSensor

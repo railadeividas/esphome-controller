@@ -25,7 +25,9 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     override var connection by mutableStateOf<ConnectionState>(ConnectionState.Connecting); private set
     override var entities by mutableStateOf<List<Entity>>(emptyList()); private set
     override val details: DeviceDetails? = null
-    override var lastError by mutableStateOf<String?>(null); private set
+    override var lastError by mutableStateOf<CommandError?>(null); private set
+    private val failed = FailedCommand()
+    override fun retryFailed() = failed.retry(entities, connection is ConnectionState.Connected, ::send)
     override var logs by mutableStateOf<List<String>>(emptyList()); private set
     /** The event stream always carries logs; they are only kept once requested. */
     @Volatile private var logsWanted = false
@@ -99,9 +101,9 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                 try {
                     client.newCall(request).execute().use { if (!it.isSuccessful) throw IOException("HTTP ${it.code}") }
                     publish { lastError = null }
-                } catch (e: Exception) { publish { lastError = "Command failed: ${e.message ?: "network error"}" } }
+                } catch (e: Exception) { failed.set(entity, command); publish { lastError = CommandError("${entity.name}: command failed (${e.message ?: "network error"})") } }
             }
-        } catch (_: java.util.concurrent.RejectedExecutionException) { lastError = "Command failed: not connected" }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { failed.set(entity, command); lastError = CommandError("${entity.name}: not connected") }
     }
     override fun close() { closed = true; stream?.cancel(); client.dispatcher.cancelAll(); executor.shutdownNow() }
 }

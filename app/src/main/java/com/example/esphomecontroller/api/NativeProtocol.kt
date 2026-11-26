@@ -68,22 +68,22 @@ fun decodeNativeFrame(frame: ApiFrame): NativeEvent {
             NativeEvent.Info(DeviceDetails(p.model, p.manufacturer, p.esphomeVersion, project))
         }
         MessageType.LIST_ENTITIES_DONE -> NativeEvent.EntitiesDone
-        12 -> Api.ListEntitiesBinarySensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.BinarySensor, category(p.entityCategory))) }
-        15 -> Api.ListEntitiesLightResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), lightPlatform(p), category(p.entityCategory))) }
-        16 -> Api.ListEntitiesSensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Sensor(p.unitOfMeasurement, p.accuracyDecimals.takeIf { it >= 0 }), category(p.entityCategory))) }
-        17 -> Api.ListEntitiesSwitchResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Switch, category(p.entityCategory))) }
-        18 -> Api.ListEntitiesTextSensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.TextSensor, category(p.entityCategory))) }
+        12 -> Api.ListEntitiesBinarySensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.BinarySensor, category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
+        15 -> Api.ListEntitiesLightResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), lightPlatform(p), category(p.entityCategory), icon = p.icon)) }
+        16 -> Api.ListEntitiesSensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Sensor(p.unitOfMeasurement, p.accuracyDecimals.takeIf { it >= 0 }), category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
+        17 -> Api.ListEntitiesSwitchResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Switch, category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
+        18 -> Api.ListEntitiesTextSensorResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.TextSensor, category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
         49 -> Api.ListEntitiesNumberResponse.parseFrom(payload).let { p ->
             val mode = when (p.mode) { Api.NumberMode.NUMBER_MODE_BOX -> NumberMode.BOX; Api.NumberMode.NUMBER_MODE_SLIDER -> NumberMode.SLIDER; else -> NumberMode.AUTO }
-            listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Number(p.minValue, p.maxValue, p.step, p.unitOfMeasurement, mode), category(p.entityCategory)))
+            listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Number(p.minValue, p.maxValue, p.step, p.unitOfMeasurement, mode), category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon))
         }
-        52 -> Api.ListEntitiesSelectResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Select(p.optionsList.toList()), category(p.entityCategory))) }
-        61 -> Api.ListEntitiesButtonResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Button, category(p.entityCategory))) }
-        13 -> Api.ListEntitiesCoverResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Cover(p.supportsPosition, p.supportsTilt, p.supportsStop), category(p.entityCategory))) }
-        14 -> Api.ListEntitiesFanResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Fan(p.supportsOscillation, p.supportsDirection, if (p.supportsSpeed) p.supportedSpeedCount.coerceAtLeast(0) else 0, p.supportedPresetModesList.toList()), category(p.entityCategory))) }
-        46 -> Api.ListEntitiesClimateResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), climatePlatform(p), category(p.entityCategory))) }
-        58 -> Api.ListEntitiesLockResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Lock(p.supportsOpen, p.requiresCode, p.codeFormat), category(p.entityCategory))) }
-        109 -> Api.ListEntitiesValveResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Valve(p.supportsPosition, p.supportsStop), category(p.entityCategory))) }
+        52 -> Api.ListEntitiesSelectResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Select(p.optionsList.toList()), category(p.entityCategory), icon = p.icon)) }
+        61 -> Api.ListEntitiesButtonResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Button, category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
+        13 -> Api.ListEntitiesCoverResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Cover(p.supportsPosition, p.supportsTilt, p.supportsStop), category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
+        14 -> Api.ListEntitiesFanResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Fan(p.supportsOscillation, p.supportsDirection, if (p.supportsSpeed) p.supportedSpeedCount.coerceAtLeast(0) else 0, p.supportedPresetModesList.toList()), category(p.entityCategory), icon = p.icon)) }
+        46 -> Api.ListEntitiesClimateResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), climatePlatform(p), category(p.entityCategory), icon = p.icon)) }
+        58 -> Api.ListEntitiesLockResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Lock(p.supportsOpen, p.requiresCode, p.codeFormat), category(p.entityCategory), icon = p.icon)) }
+        109 -> Api.ListEntitiesValveResponse.parseFrom(payload).let { p -> listed(p.disabledByDefault, Entity(p.key, p.deviceId, name(p.name, p.objectId), Platform.Valve(p.supportsPosition, p.supportsStop), category(p.entityCategory), deviceClass = p.deviceClass, icon = p.icon)) }
         22 -> Api.CoverStateResponse.parseFrom(payload).let { p -> NativeEvent.StateChanged(p.key, p.deviceId, EntityState.Positioned(p.position.unit(), p.tilt.unit(), coverOperation(p.currentOperationValue))) }
         23 -> Api.FanStateResponse.parseFrom(payload).let { p -> NativeEvent.StateChanged(p.key, p.deviceId, EntityState.Fan(p.state, p.oscillating, p.direction == Api.FanDirection.FAN_DIRECTION_REVERSE, p.speedLevel, p.presetMode.ifBlank { null })) }
         47 -> Api.ClimateStateResponse.parseFrom(payload).let { p -> NativeEvent.StateChanged(p.key, p.deviceId, if (p.missingState) EntityState.Missing else climateState(p)) }
@@ -222,7 +222,8 @@ private fun unsupportedListing(frame: ApiFrame): NativeEvent? {
     val deviceId = (field("device_id") as? Int) ?: 0
     val name = name(field("name") as? String ?: "", field("object_id") as? String ?: "")
     val category = (field("entity_category") as? Descriptors.EnumValueDescriptor)?.number?.let(EntityCategory::fromNumber) ?: EntityCategory.NONE
-    return NativeEvent.EntityListed(Entity(key, deviceId, name, Platform.Unsupported(platformLabel(descriptor.name)), category))
+    return NativeEvent.EntityListed(Entity(key, deviceId, name, Platform.Unsupported(platformLabel(descriptor.name)), category,
+        deviceClass = field("device_class") as? String ?: "", icon = field("icon") as? String ?: ""))
 }
 
 /** Builds the platform-specific command; returns null for commands the entity does not advertise. */
