@@ -147,17 +147,6 @@ private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp
     }
 }
 
-/** Small coloured connection label: green when connected, red for setup problems, grey otherwise. */
-@Composable
-private fun ConnectionChip(text: String, connected: Boolean, problem: Boolean) {
-    val color = when { problem -> MaterialTheme.colorScheme.error; connected -> Color(0xFF36A76B); else -> Color(0xFFAAA7B2) }
-    Row(Modifier.clip(CircleShape).background(color.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).background(color, CircleShape))
-        Spacer(Modifier.width(5.dp))
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
-    }
-}
-
 @Composable
 fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
     val home = store.home
@@ -208,7 +197,8 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleLarge)
-                        ConnectionChip(connectionSummary(session, setupError, manager.lastSeen(device.id)), session.isConnected, setupError != null)
+                        Text(connectionSummary(session, setupError, manager.lastSeen(device.id)), style = MaterialTheme.typography.bodyMedium,
+                            color = if (setupError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
