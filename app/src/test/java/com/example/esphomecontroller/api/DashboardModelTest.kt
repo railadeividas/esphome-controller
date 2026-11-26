@@ -60,4 +60,11 @@ class DashboardModelTest {
         assertEquals("The device rejected the encryption key", failureReason(KeyRejectedException()))
         assertEquals("Unsupported API version 2.0", failureReason(java.io.IOException("Unsupported API version 2.0")))
     }
+
+    @Test fun placeLineJoinsHomeAndArea() {
+        assertEquals("My home · Hallway", com.example.esphomecontroller.placeLine("My home", "Hallway"))
+        assertEquals("My home", com.example.esphomecontroller.placeLine("My home", ""))
+        assertEquals("Hallway", com.example.esphomecontroller.placeLine(null, "Hallway"))
+        assertNull(com.example.esphomecontroller.placeLine(null, null))
+    }
 }

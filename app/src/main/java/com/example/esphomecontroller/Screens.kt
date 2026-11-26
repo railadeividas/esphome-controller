@@ -42,6 +42,10 @@ fun connectionSummary(session: ControlSession?, setupError: String?, lastSeen: L
     is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, now)}" } ?: "")
 }
 
+/** "Home · Area", leaving out whichever is unknown; null when neither is. */
+fun placeLine(homeName: String?, area: String?): String? =
+    listOfNotNull(homeName?.takeIf { it.isNotBlank() }, area?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+
 fun deviceCount(n: Int) = if (n == 1) "1 device" else "$n devices"
 
 /** "just now", "5 min ago", "3 h ago", "2 d ago". */
@@ -163,7 +167,7 @@ fun DeviceListScreen(store: HomeStore, manager: ConnectionManager, onOpen: (Stri
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        manager.details(d.id)?.area?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        placeLine(store.homeName(d.homeId), manager.details(d.id)?.area)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -199,7 +203,7 @@ fun DeviceDetailScreen(store: HomeStore, manager: ConnectionManager, device: Hom
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleLarge)
-                        details?.area?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        placeLine(store.homeName(device.homeId), details?.area)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Text(connectionSummary(session, setupError, manager.lastSeen(device.id)), style = MaterialTheme.typography.bodyMedium,
                             color = if (setupError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
