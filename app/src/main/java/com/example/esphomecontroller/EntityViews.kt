@@ -110,7 +110,7 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
     val send = Sender(session, live, isCommandReady(session.isConnected, live))
     val p = entity.platform
     val gestures = if (onOpen == null) Modifier else Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) }
-    Card(modifier.heightIn(min = 142.dp).then(gestures), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+    Card(modifier.heightIn(min = 142.dp).then(gestures), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
       Box {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

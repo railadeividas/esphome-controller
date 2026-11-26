@@ -154,7 +154,7 @@ private fun EntityBlock(items: List<Item>, store: HomeStore, manager: Connection
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        if (readOnly.isNotEmpty()) Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+        if (readOnly.isNotEmpty()) Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) {
                 readOnly.forEachIndexed { i, item ->
                     if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)

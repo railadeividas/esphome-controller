@@ -168,7 +168,7 @@ fun DeviceSetupScreen(
         Text(if (isNew) "Set up device" else "Edit device", style = MaterialTheme.typography.headlineSmall)
 
         discovered?.let { d ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(d.displayName, style = MaterialTheme.typography.titleMedium)
@@ -258,7 +258,7 @@ fun DeviceSetupScreen(
             SetupStatus.None -> Unit
             is SetupStatus.Busy -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text(s.text) }
             is SetupStatus.Message -> Text(s.text, color = if (s.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-            is SetupStatus.Tested -> Card(Modifier.fillMaxWidth()) {
+            is SetupStatus.Tested -> Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     when (val r = s.result) {
                         is ProbeResult.Success -> {

@@ -105,7 +105,7 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
             Text("Tap Refresh to search for devices on this network.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (available.isEmpty() && !scan.scanning && scan.finished) item {
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("No new devices found", style = MaterialTheme.typography.titleSmall)
                     Text("• The phone must be on the same Wi-Fi network as the device.", style = MaterialTheme.typography.bodySmall)
@@ -116,7 +116,7 @@ fun DiscoverScreen(store: HomeStore, discovered: Map<String, DiscoveredDevice>, 
             }
         }
         items(available, key = { it.serviceName }) { d ->
-            Card(onClick = { onSetup(HomeStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth()) {
+            Card(onClick = { onSetup(HomeStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(d.displayName, style = MaterialTheme.typography.titleMedium)
