@@ -195,7 +195,11 @@ class NativeProtocolTest {
         subscribeLogsFrame().let { assertEquals(28, it.type); assertEquals(Api.LogLevel.LOG_LEVEL_VERY_VERBOSE, Api.SubscribeLogsRequest.parseFrom(it.payload).level) }
         val lines = (1..MAX_LOG_LINES + 5).fold(emptyList<String>()) { acc, i -> appendLog(acc, "line $i") }
         assertEquals(MAX_LOG_LINES, lines.size); assertEquals("line ${MAX_LOG_LINES + 5}", lines.last())
-        assertEquals("[state] Sleep timer remaining: Disabled", stateLogLine(Entity(1, 0, "Sleep timer remaining", Platform.TextSensor, state = EntityState.Text("Disabled"))))
-        assertEquals("[state] Temp: unknown", stateLogLine(Entity(2, 0, "Temp", Platform.Sensor(), state = EntityState.Missing)))
+        subscribeLogsFrame(LogLevel.DEBUG.protoValue).let { assertEquals(Api.LogLevel.LOG_LEVEL_DEBUG, Api.SubscribeLogsRequest.parseFrom(it.payload).level) }
+        stateLogLine(Entity(1, 0, "Sleep timer remaining", Platform.TextSensor, state = EntityState.Text("Disabled")), time = 0, seq = 1).let {
+            assertTrue(it.isState); assertEquals("Sleep timer remaining", it.tag); assertEquals("Disabled", it.message)
+            assertEquals("00:00:00.000 [state] Sleep timer remaining: Disabled", it.export(java.time.ZoneOffset.UTC))
+        }
+        assertEquals("unknown", stateLogLine(Entity(2, 0, "Temp", Platform.Sensor(), state = EntityState.Missing)).message)
     }
 }

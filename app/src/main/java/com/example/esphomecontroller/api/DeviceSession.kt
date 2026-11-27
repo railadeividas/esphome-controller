@@ -25,9 +25,15 @@ interface ControlSession : AutoCloseable {
     /** Re-sends the command behind [lastError] to the current copy of its entity, if it is still ready. */
     fun retryFailed()
     /** Recent device log lines, newest last; kept in memory only and only after [subscribeLogs]. */
-    val logs: List<String>
-    /** Starts receiving device logs on this connection. Logs may contain network details; never persist them. */
-    fun subscribeLogs()
+    val logs: List<LogLine>
+    /**
+     * Starts receiving device logs on this connection, up to [level] where the interface supports choosing it (the Native API does; the web
+     * server's event stream always carries what the device logs). Calling it again with another level changes the level. Logs may contain
+     * network details; never persist them.
+     */
+    fun subscribeLogs(level: LogLevel = LogLevel.VERY_VERBOSE)
+    /** Empties [logs]; receiving continues. */
+    fun clearLogs()
 }
 
 /** A failed command. [serial] is unique across sessions so each failure is reported once. */
@@ -45,14 +51,9 @@ internal class FailedCommand {
     }
 }
 
-const val MAX_LOG_LINES = 300
+const val MAX_LOG_LINES = 1000
 
-fun appendLog(logs: List<String>, line: String): List<String> = (logs + line).takeLast(MAX_LOG_LINES)
-
-const val STATE_LOG_PREFIX = "[state] "
-
-/** A log-view line for a state update, like the web UI's live state stream; devices do not log these at DEBUG. */
-fun stateLogLine(entity: Entity): String = "$STATE_LOG_PREFIX${entity.name}: ${displayValue(entity) ?: "unknown"}"
+fun <T> appendLog(logs: List<T>, line: T): List<T> = if (logs.size < MAX_LOG_LINES) logs + line else logs.subList(logs.size - MAX_LOG_LINES + 1, logs.size) + line
 
 val ControlSession?.isConnected: Boolean get() = this?.connection is ConnectionState.Connected
 
@@ -64,8 +65,10 @@ class DeviceSession(private val host: String, private val port: Int, private val
     override var entitiesComplete by mutableStateOf(false); private set
     override var lastError by mutableStateOf<CommandError?>(null); private set
     private val failed = FailedCommand()
-    override var logs by mutableStateOf<List<String>>(emptyList()); private set
-    @Volatile private var logsWanted = false
+    override var logs by mutableStateOf<List<LogLine>>(emptyList()); private set
+    /** The level logs were requested at; null until [subscribeLogs]. */
+    @Volatile private var logLevel: LogLevel? = null
+    private val logsWanted get() = logLevel != null
     private val ui = Handler(Looper.getMainLooper())
     /** Serialises writes (commands and keepalive pings) off the main thread. */
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "esphome-writer") }
@@ -110,7 +113,7 @@ class DeviceSession(private val host: String, private val port: Int, private val
                         entities = applyState(entities, event)
                         if (logsWanted) entities.firstOrNull { it.webId == null && it.key == event.key && it.deviceId == event.deviceId }?.let { logs = appendLog(logs, stateLogLine(it)) }
                     }
-                    is NativeEvent.Log -> if (logsWanted) publish { logs = appendLog(logs, event.text) }
+                    is NativeEvent.Log -> if (logsWanted) { val line = parseLogLine(event.text, levelHint = event.level); publish { logs = appendLog(logs, line) } }
                     NativeEvent.Ignored -> Unit
                 }
             }
@@ -149,13 +152,15 @@ class DeviceSession(private val host: String, private val port: Int, private val
 
     override fun retryFailed() = failed.retry(entities, connection is ConnectionState.Connected, ::send)
 
-    override fun subscribeLogs() {
-        if (logsWanted) return
-        logsWanted = true
+    override fun subscribeLogs(level: LogLevel) {
+        if (logLevel == level) return
+        logLevel = level
         try {
-            worker.execute { try { subscribeLogsFrame().let { send(it.type, it.payload) } } catch (e: Exception) { logsWanted = false; publish { lastError = CommandError("Could not subscribe to logs: ${e.message}") } } }
-        } catch (_: java.util.concurrent.RejectedExecutionException) { logsWanted = false }
+            worker.execute { try { subscribeLogsFrame(level.protoValue).let { send(it.type, it.payload) } } catch (e: Exception) { logLevel = null; publish { lastError = CommandError("Could not subscribe to logs: ${e.message}") } } }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { logLevel = null }
     }
+
+    override fun clearLogs() { logs = emptyList() }
 
     override fun close() {
         closed = true; key?.fill(0)

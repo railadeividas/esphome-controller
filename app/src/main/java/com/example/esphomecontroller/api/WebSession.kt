@@ -30,10 +30,11 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
     override var lastError by mutableStateOf<CommandError?>(null); private set
     private val failed = FailedCommand()
     override fun retryFailed() = failed.retry(entities, connection is ConnectionState.Connected, ::send)
-    override var logs by mutableStateOf<List<String>>(emptyList()); private set
+    override var logs by mutableStateOf<List<LogLine>>(emptyList()); private set
     /** The event stream always carries logs; they are only kept once requested. */
     @Volatile private var logsWanted = false
-    override fun subscribeLogs() { logsWanted = true }
+    override fun subscribeLogs(level: LogLevel) { logsWanted = true }
+    override fun clearLogs() { logs = emptyList() }
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val base = HttpUrl.Builder().scheme("http").host(host).port(port).build()
@@ -56,7 +57,7 @@ class WebSession(host: String, port: Int, username: String?, password: String?) 
                 if (!(response.header("Content-Type") ?: "").startsWith("text/event-stream", ignoreCase = true)) throw IOException("Web server did not provide events")
                 val source = response.body?.source() ?: throw IOException("Empty web server response")
                 publish { connection = ConnectionState.Connected(Security.WEB) }
-                consumeWebEvents(source, { closed }, onLog = { line -> if (logsWanted) publish { logs = appendLog(logs, stripAnsi(line)) } }, onEvent = ::handle)
+                consumeWebEvents(source, { closed }, onLog = { text -> if (logsWanted) { val line = parseLogLine(stripAnsi(text)); publish { logs = appendLog(logs, line) } } }, onEvent = ::handle)
                 if (!closed) throw IOException("Web server disconnected")
             }
         } catch (e: Exception) { publish { connection = ConnectionState.Failed(e.message ?: "Web server unavailable", needsSetup = e is SetupException) } }

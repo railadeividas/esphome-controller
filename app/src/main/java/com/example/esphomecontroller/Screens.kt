@@ -234,29 +234,6 @@ private fun deviceFacts(device: LocationStore.Device, details: DeviceDetails?): 
         .mapNotNull { (k, v) -> v?.takeIf { it.isNotBlank() }?.let { k to it } }
 
 /** Live device logs for the current connection; kept in memory only, never saved or shared. */
-@Composable
-private fun DeviceLogs(device: LocationStore.Device, session: ControlSession?, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
-    // Subscribing is per connection, so subscribe again after a reconnect.
-    LaunchedEffect(session, session.isConnected) { if (session.isConnected) session?.subscribeLogs() }
-    var showStates by rememberSaveable { mutableStateOf(true) }
-    val logs = session?.logs.orEmpty().let { all -> if (showStates) all else all.filterNot { it.startsWith(STATE_LOG_PREFIX) } }
-    val listState = rememberLazyListState()
-    LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.scrollToItem(logs.lastIndex) }
-    ScreenHeader("Logs", subtitle = device.name, navigation = HeaderNavigation.back("Back to ${device.name}", onBack)) {
-        IconToggleButton(checked = showStates, onCheckedChange = { showStates = it }) {
-            Icon(Icons.Default.FilterList, contentDescription = if (showStates) "Hide state updates" else "Show state updates",
-                tint = if (showStates) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    Text("Shown while this page is open and kept only in memory. Logs can include network details; take care when sharing screenshots.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (!session.isConnected) Text(connectionSummary(session, null), style = MaterialTheme.typography.bodySmall)
-    else if (logs.isEmpty()) Text("Waiting for log messages…", style = MaterialTheme.typography.bodySmall)
-    LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(2.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        items(logs.size) { i -> Text(logs[i], style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
-    }
-}
-
 private fun LazyListScope.entitySection(title: String, entities: List<Entity>, session: ControlSession?, live: List<Entity>) {
     if (entities.isEmpty()) return
     item(key = "header:$title") {
