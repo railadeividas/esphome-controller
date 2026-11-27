@@ -57,7 +57,7 @@ private fun SettingsHome(store: LocationStore, dashboards: DashboardStore, onOpe
         }
         item {
             SettingsGroup {
-                SettingsRow(Icons.Default.Palette, AppearanceColor, "Appearance", "${themeLabel(store.theme)} theme · navigation labels ${if (store.navLabels) "on" else "off"}", onClick = { onOpen(SettingsPage.APPEARANCE) }, chevron = true)
+                SettingsRow(Icons.Default.Palette, AppearanceColor, "Appearance", "${themeLabel(store.theme)} theme${if (store.pureBlack) " · black background" else ""} · navigation labels ${if (store.navLabels) "on" else "off"}", onClick = { onOpen(SettingsPage.APPEARANCE) }, chevron = true)
             }
         }
         item {
@@ -159,6 +159,13 @@ private fun AppearanceSettings(store: LocationStore, onBack: () -> Unit) {
                         Text(if (value == "system") "System default" else themeLabel(value), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         RadioButton(selected = store.theme == value, onClick = null)
                     }
+                }
+            }
+        }
+        item {
+            SettingsGroup {
+                SettingsRow(Icons.Default.Contrast, AppearanceColor, "Black background", "Pure black in the dark theme, for OLED screens", onClick = { store.changePureBlack(!store.pureBlack) }) {
+                    Switch(checked = store.pureBlack, onCheckedChange = { store.changePureBlack(it) })
                 }
             }
         }

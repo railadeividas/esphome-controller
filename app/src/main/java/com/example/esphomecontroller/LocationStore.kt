@@ -39,6 +39,9 @@ class LocationStore(private val prefs: SharedPreferences) {
     /** Text labels under the bottom navigation icons (icons only by default). */
     var navLabels by mutableStateOf(prefs.getBoolean("navLabels", false)); private set
     fun changeNavLabels(value: Boolean) { navLabels = value; prefs.edit().putBoolean("navLabels", value).apply() }
+    /** Pure black background in the dark theme, for OLED screens. */
+    var pureBlack by mutableStateOf(prefs.getBoolean("pureBlack", false)); private set
+    fun changePureBlack(value: Boolean) { pureBlack = value; prefs.edit().putBoolean("pureBlack", value).apply() }
     fun changeTheme(value: String) { if (value in THEMES) { theme = value; prefs.edit().putString("theme", value).apply() } }
 
     private fun parseDevice(o: JSONObject) = Device(

@@ -55,7 +55,9 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
     val dark = when (store.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
     val view = LocalView.current
     SideEffect { WindowCompat.getInsetsController(activity.window, view).apply { isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark } }
-    val colors = if (dark) darkColorScheme(primary = Color(0xFFCCBEFF), onPrimary = Color(0xFF302269), secondary = Color(0xFFCCC2DF), background = Color(0xFF15141B), surface = Color(0xFF24232C), surfaceVariant = Color(0xFF49454F))
+    // OLED mode: black page and navigation bar, slightly darker cards that still stand out.
+    val black = dark && store.pureBlack
+    val colors = if (dark) darkColorScheme(primary = Color(0xFFCCBEFF), onPrimary = Color(0xFF302269), secondary = Color(0xFFCCC2DF), background = if (black) Color.Black else Color(0xFF15141B), surface = if (black) Color(0xFF1B1A21) else Color(0xFF24232C), surfaceVariant = Color(0xFF49454F))
         else lightColorScheme(primary = Color(0xFF5545A0), secondary = Color(0xFF65558F), background = Color(0xFFF2F1F7), surface = Color.White, surfaceVariant = Color(0xFFE9E7F0))
 
     fun edit(device: LocationStore.Device, new: Boolean) { editing = device; isNew = new }
@@ -99,7 +101,7 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                     }
                 }
                 // A slimmer bar than Material's 80 dp NavigationBar: 64 dp with labels, 40 dp with icons only (the 32 dp indicator plus the same small gap).
-                if (editing == null) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+                if (editing == null) Surface(Modifier.fillMaxWidth(), color = if (black) Color.Black else MaterialTheme.colorScheme.surface, tonalElevation = if (black) 0.dp else 3.dp) {
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(if (store.navLabels) 64.dp else 40.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
                         listOf(Triple(Page.DASHBOARD, "Dashboard", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
                             NavigationBarItem(
