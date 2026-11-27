@@ -56,7 +56,7 @@ fun NewDashboardDialog(store: LocationStore, onDismiss: () -> Unit, onCreate: (S
                 RadioRow(template == DashboardTemplate.ByType, "Grouped by type", "Lights, switches, climate… across all devices, plus readings") { template = DashboardTemplate.ByType }
             }
         },
-        confirmButton = { TextButton(onClick = { onCreate(name, template) }) { Text("Create") } },
+        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onCreate(name.trim(), template) }) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

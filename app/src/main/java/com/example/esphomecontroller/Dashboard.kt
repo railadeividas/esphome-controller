@@ -40,7 +40,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember(board.id) { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var creating by remember { mutableStateOf(false) }
     var addingSection by remember(board.id) { mutableStateOf(false) }
     var editingSection by remember(board.id) { mutableStateOf<Section?>(null) }
     var picking by remember(board.id) { mutableStateOf<Section?>(null) }
@@ -78,7 +77,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
                         )
                     }
                     HorizontalDivider()
-                    DropdownMenuItem(text = { Text("New dashboard") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { menuOpen = false; creating = true })
                     DropdownMenuItem(text = { Text("Manage dashboards") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuOpen = false; onManageDashboards() })
                 }
             },
@@ -121,11 +119,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         }
     }
 
-    if (creating) NewDashboardDialog(store, onDismiss = { creating = false }) { name, template ->
-        creating = false
-        dashboards.create(name, template, store, { manager.entities(it) }, { manager.details(it)?.area })
-        editing = template == DashboardTemplate.Empty
-    }
     if (showSettings) DashboardSettingsSheet(board, dashboards, onDismiss = { showSettings = false })
     if (addingSection) SectionDialog(null, store, onDismiss = { addingSection = false }) { section ->
         addingSection = false
