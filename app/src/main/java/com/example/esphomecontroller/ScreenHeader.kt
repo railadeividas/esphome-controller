@@ -19,6 +19,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** The leading button of a [ScreenHeader]: back on sub-pages, close on full-screen forms. */
@@ -92,3 +93,18 @@ fun ScreenHeader(
 @Composable
 fun PageSectionTitle(text: String, modifier: Modifier = Modifier) =
     Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = modifier.semantics { heading() })
+
+/**
+ * Lays content out without [trim] at its top and bottom, so a control's invisible touch padding does not count as
+ * spacing: with it, the first visible element of every page starts the same 12 dp below the header divider. Touch
+ * targets keep their full size and reach into the neighbouring space.
+ */
+fun Modifier.trimVertical(trim: Dp) = layout { measurable, constraints ->
+    val t = trim.roundToPx()
+    val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight + 2 * t else constraints.maxHeight))
+    val height = (placeable.height - 2 * t).coerceAtLeast(0)
+    layout(placeable.width, height) { placeable.place(0, -t) }
+}
+
+/** Material's minimum touch target; icon buttons and chips take this much layout space around a smaller visible shape. */
+val TouchTarget = 48.dp

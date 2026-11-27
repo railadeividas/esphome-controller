@@ -1,6 +1,5 @@
 package com.example.esphomecontroller
 
-import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -176,9 +175,11 @@ private fun SectionView(
             onRemove = { dashboards.removeItem(board.id, section.id, r.ref) },
         )
     }
-    // The section's top lines up with the first card on other pages; the header buttons' extra height goes below the section instead.
-    Column(Modifier.padding(bottom = HeaderButtonOverhang), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    // Sections that can show header buttons always keep their height, so the title doesn't move when the all on/off button appears.
+    val hasButtons = editing || section.allOnOff || (section.collapsible && section.hasEntities)
+    val hasTitle = section.title.isNotBlank() || sectionIcon(section.icon) != null
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().then(if (hasButtons || hasTitle) Modifier.heightIn(min = HeaderButtonRow) else Modifier), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 val title = section.title
                 val icon = sectionIcon(section.icon)
@@ -189,7 +190,7 @@ private fun SectionView(
                 }
                 if (section.text.isNotBlank()) Text(section.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row(Modifier.compactHeight(), verticalAlignment = Alignment.CenterVertically) { if (editing) {
+            Row(Modifier.trimVertical((TouchTarget - HeaderButtonRow) / 2), verticalAlignment = Alignment.CenterVertically) { if (editing) {
                 IconButton(enabled = index > 0, onClick = { dashboards.moveSection(board.id, section.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
                 IconButton(enabled = index < board.sections.lastIndex, onClick = { dashboards.moveSection(board.id, section.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit section") }
@@ -339,12 +340,5 @@ private fun EntitySheet(
     }
 }
 
-/** How far a 48 dp icon button reaches above and below its 24 dp icon. */
-private val HeaderButtonOverhang = 12.dp
-
-/** Lays the header buttons out as tall as their icons, so they don't push the section title down; their touch targets keep the full size. */
-private fun Modifier.compactHeight() = layout { measurable, constraints ->
-    val placeable = measurable.measure(constraints.copy(minHeight = 0))
-    val height = (placeable.height - 2 * HeaderButtonOverhang.roundToPx()).coerceAtLeast(0)
-    layout(placeable.width, height) { placeable.place(0, (height - placeable.height) / 2) }
-}
+/** Section header buttons: their 40 dp pressed/focus circle plus 2 dp of space around it, so it never touches the header divider or the cards. */
+private val HeaderButtonRow = 44.dp

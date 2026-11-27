@@ -125,7 +125,8 @@ fun DeviceLogs(device: LocationStore.Device, session: ControlSession?, onBack: (
         trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = "Clear search") } },
     )
 
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Chips are 32 dp inside 48 dp touch targets; count only the chips, like the cards on other pages.
+    Row(Modifier.fillMaxWidth().trimVertical((TouchTarget - 32.dp) / 2).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         tag?.let { t ->
             InputChip(selected = true, onClick = { tag = null }, label = { Text(t) }, leadingIcon = { Icon(Icons.Default.Tag, null, Modifier.size(18.dp)) },
                 trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove tag filter", modifier = Modifier.size(18.dp)) })
