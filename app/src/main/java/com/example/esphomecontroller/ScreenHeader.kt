@@ -10,7 +10,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -29,7 +33,7 @@ class HeaderNavigation(val icon: ImageVector, val description: String, val onCli
 private val PagePadding = 16.dp
 
 /**
- * The header every page uses: a 64 dp bar, separated from the content by a full-width divider, with an optional back/close button, a titleLarge title
+ * The header every page uses: a tonal 64 dp bar (same tone as the bottom navigation), separated from the content by a full-width divider, with an optional back/close button, a titleLarge title
  * with an optional one-line subtitle, and trailing actions (icon buttons, or a text button to confirm).
  * With [onTitleClick] the title shows a drop-down arrow and [titleMenu] is anchored to it.
  */
@@ -43,13 +47,20 @@ fun ScreenHeader(
     titleMenu: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    // The header reaches past the page's 16 dp side padding: the divider spans the screen, icons sit 16 dp from its edges.
-    Column(Modifier.layout { measurable, constraints ->
-        val bleed = PagePadding.roundToPx()
-        val width = constraints.maxWidth + 2 * bleed
-        val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
-        layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
-    }) {
+    // The header reaches past the page's 16 dp side padding: the bar spans the screen, icons sit 16 dp from its edges.
+    // Its tone matches the bottom navigation bar and also fills the status bar area above it.
+    val barColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
+    val statusBarHeight = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+    Column(
+        Modifier
+            .layout { measurable, constraints ->
+                val bleed = PagePadding.roundToPx()
+                val width = constraints.maxWidth + 2 * bleed
+                val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
+            }
+            .drawBehind { drawRect(barColor, topLeft = Offset(0f, -statusBarHeight), size = Size(size.width, size.height + statusBarHeight)) },
+    ) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
         if (navigation != null) IconButton(onClick = navigation.onClick) { Icon(navigation.icon, contentDescription = navigation.description) }
         else Spacer(Modifier.width(PagePadding - 4.dp))
