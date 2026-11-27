@@ -44,16 +44,31 @@ class DashboardStoreTest {
 
     @Test fun dashboardsRoundTripThroughJson() {
         val d = Dashboard("id1", "Evening", listOf(
-            Section("s1", SectionType.TILES, "Lights", listOf(ItemRef("stairs", "light:0:1"))),
-            Section("s2", SectionType.DEVICE, "", deviceId = "hub", collapsed = true),
-            Section("s3", SectionType.HEADING, "Upstairs", text = "Bedrooms"),
+            Section("s1", SectionType.TILES, "Lights", listOf(ItemRef("stairs", "light:0:1")), columns = 3, readingsAsList = false, tapAction = TapAction.TOGGLE, allOnOff = false),
+            Section("s2", SectionType.DEVICE, "", deviceId = "hub", collapsed = true, showConfig = false, showDiagnostic = true, collapsible = false),
+            Section("s3", SectionType.HEADING, "Upstairs", text = "Bedrooms", titleSize = TitleSize.H1),
             Section("s4", SectionType.LIST, "Readings", listOf(ItemRef("hub", "sensor:0:4"))),
-        ), DashboardSettings(columns = 3, readingsAsList = false, tapToToggle = true, summaryLine = true, pullToRefresh = false))
+            Section("s5", SectionType.LIST, "Plain", showDeviceNames = false, tapAction = TapAction.NONE),
+            Section("s6", SectionType.COMPACT, "Small", listOf(ItemRef("stairs", "switch:0:2")), text = "Hall", columns = 4, titleSize = TitleSize.H2),
+        ), DashboardSettings(summaryLine = true, pullToRefresh = false, brightnessPercent = false))
         assertEquals(d, DashboardCodec.decode(JSONObject(DashboardCodec.encode(d).toString())))
         // Missing settings fall back to defaults; unknown section types are skipped.
         val partial = JSONObject("""{"id":"x","name":"Old","sections":[{"id":"a","type":"FUTURE"},{"id":"b","type":"HEADING","title":"Hi"}]}""")
         val decoded = DashboardCodec.decode(partial)
         assertEquals(DashboardSettings(), decoded.settings); assertEquals(listOf("b"), decoded.sections.map { it.id })
+    }
+
+    @Test fun oldDashboardSettingsBecomeSectionOptions() {
+        val old = JSONObject("""{"id":"x","name":"Old","settings":{"columns":3,"readingsAsList":false,"collapsibleSections":false,"showDeviceNames":false,
+            "showConfigDiagnostic":false,"tapToToggle":true,"summaryLine":true},"sections":[{"id":"a","type":"TILES"},{"id":"b","type":"DEVICE","deviceId":"hub"}]}""")
+        val d = DashboardCodec.decode(old)
+        assertTrue(d.settings.summaryLine)
+        d.sections.forEach { s ->
+            assertEquals(3, s.columns); assertFalse(s.readingsAsList); assertFalse(s.collapsible); assertFalse(s.showDeviceNames)
+            assertFalse(s.showConfig); assertFalse(s.showDiagnostic); assertEquals(TapAction.TOGGLE, s.tapAction)
+        }
+        val noSheet = DashboardCodec.decode(JSONObject("""{"id":"y","name":"N","settings":{"controlsSheet":false},"sections":[{"id":"a","type":"LIST"}]}"""))
+        assertEquals(TapAction.NONE, noSheet.sections.single().tapAction)
     }
 
     @Test fun moveKeepsBoundsAndDeviceIdsCollectEverySection() {

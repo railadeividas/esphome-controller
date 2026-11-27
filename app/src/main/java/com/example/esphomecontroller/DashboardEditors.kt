@@ -60,10 +60,12 @@ fun NewDashboardDialog(store: LocationStore, onDismiss: () -> Unit, onCreate: (S
     )
 }
 
-/** Adds a section (type, title, device or text) or edits an existing one. */
+/** Adds a section (type, title, device or text, and its options) or edits an existing one. */
 @Composable
 fun SectionDialog(existing: Section?, store: LocationStore, onDismiss: () -> Unit, onSave: (Section) -> Unit) {
     var type by remember { mutableStateOf(existing?.type ?: SectionType.TILES) }
+    var o by remember { mutableStateOf(existing ?: Section(type = SectionType.TILES)) }
+    var titleSize by remember { mutableStateOf(existing?.titleSize) }
     var title by remember { mutableStateOf(existing?.title ?: "") }
     var text by remember { mutableStateOf(existing?.text ?: "") }
     var deviceId by remember { mutableStateOf(existing?.deviceId ?: store.devices.firstOrNull()?.id) }
@@ -77,21 +79,32 @@ fun SectionDialog(existing: Section?, store: LocationStore, onDismiss: () -> Uni
                     Text("Type", style = MaterialTheme.typography.titleSmall)
                     SectionType.entries.forEach { t -> RadioRow(type == t, t.label, t.description) { type = t } }
                     Spacer(Modifier.height(8.dp))
+                } else if (type in Section.CHOSEN_ITEM_TYPES) {
+                    Text("Style", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Section.CHOSEN_ITEM_TYPES.forEach { t -> FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t.label) }) }
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
-                OutlinedTextField(title, { title = it }, label = { Text(if (type == SectionType.DEVICE) "Title (optional, defaults to the device name)" else "Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (type == SectionType.HEADING) OutlinedTextField(text, { text = it }, label = { Text("Text (optional)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it }, label = { Text(if (type == SectionType.DEVICE) "Title (optional, defaults to the device name)" else "Title (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Title size", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val effective = titleSize ?: Section(type = type).titleSizeOrDefault
+                    TitleSize.entries.forEach { size -> FilterChip(selected = effective == size, onClick = { titleSize = size }, label = { Text(size.label, style = size.textStyle().copy(fontSize = MaterialTheme.typography.labelLarge.fontSize)) }) }
+                }
+                OutlinedTextField(text, { text = it }, label = { Text("Text (optional)") }, modifier = Modifier.fillMaxWidth())
                 if (type == SectionType.DEVICE) {
                     Spacer(Modifier.height(8.dp))
                     Text("Device", style = MaterialTheme.typography.titleSmall)
                     if (store.devices.isEmpty()) Text("No devices in the app yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     store.devices.forEach { d -> RadioRow(deviceId == d.id, d.name, store.locationName(d.locationId)) { deviceId = d.id } }
                 }
+                if (type != SectionType.HEADING) SectionOptions(o.copy(type = type)) { o = it }
             }
         },
         confirmButton = {
             TextButton(enabled = valid, onClick = {
-                val base = existing ?: Section(type = type)
-                onSave(base.copy(type = type, title = title.trim(), text = text.trim(), deviceId = if (type == SectionType.DEVICE) deviceId else null))
+                onSave(o.copy(type = type, titleSize = titleSize, title = title.trim(), text = text.trim(), deviceId = if (type == SectionType.DEVICE) deviceId else null))
             }) { Text(if (existing == null) "Add" else "Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -139,6 +152,31 @@ fun EntityPicker(store: LocationStore, manager: ConnectionManager, selected: Lis
     }
 }
 
+/** Layout, content and behaviour of one section; only options that apply to [s]'s type are shown. */
+@Composable
+private fun SectionOptions(s: Section, onChange: (Section) -> Unit) {
+    Spacer(Modifier.height(12.dp))
+    Text("Options", style = MaterialTheme.typography.titleSmall)
+    if (s.hasTiles) {
+        Text("Tile columns", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf(0 to "Auto", 1 to "1", 2 to "2", 3 to "3", 4 to "4").forEach { (value, label) ->
+                FilterChip(selected = s.columns == value, onClick = { onChange(s.copy(columns = value)) }, label = { Text(label) })
+            }
+        }
+        SwitchRow("Readings as a list", "Sensors and text values in a compact list under the tiles", s.readingsAsList) { onChange(s.copy(readingsAsList = it)) }
+    }
+    if (s.hasChosenItems) SwitchRow("Device names", "Under each entity name", s.showDeviceNames) { onChange(s.copy(showDeviceNames = it)) }
+    if (s.type == SectionType.DEVICE) {
+        SwitchRow("Configuration entities", null, s.showConfig) { onChange(s.copy(showConfig = it)) }
+        SwitchRow("Diagnostic entities", null, s.showDiagnostic) { onChange(s.copy(showDiagnostic = it)) }
+    }
+    SwitchRow("All on / all off button", "When the section has lights, switches or fans", s.allOnOff) { onChange(s.copy(allOnOff = it)) }
+    SwitchRow("Collapsible", null, s.collapsible) { onChange(s.copy(collapsible = it)) }
+    Text("Tap action", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+    TapAction.entries.forEach { a -> RadioRow(s.tapAction == a, a.label, a.description) { onChange(s.copy(tapAction = a)) } }
+}
+
 @Composable
 private fun SwitchRow(label: String, description: String? = null, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -150,7 +188,7 @@ private fun SwitchRow(label: String, description: String? = null, checked: Boole
     }
 }
 
-/** Every dashboard feature, configured for this dashboard only. */
+/** Options for the whole dashboard; layout and behaviour of sections are set on each section. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardSettingsSheet(board: Dashboard, dashboards: DashboardStore, onDismiss: () -> Unit) {
@@ -163,22 +201,11 @@ fun DashboardSettingsSheet(board: Dashboard, dashboards: DashboardStore, onDismi
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             SwitchRow("Default dashboard", "Opens when the app starts", board.id == dashboards.defaultId) { if (it) dashboards.setDefault(board.id) }
 
-            Text("Layout", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-            Text("Tile columns", style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0 to "Auto", 1 to "1", 2 to "2", 3 to "3", 4 to "4").forEach { (value, label) ->
-                    FilterChip(selected = s.columns == value, onClick = { set(s.copy(columns = value)) }, label = { Text(label) })
-                }
-            }
-            SwitchRow("Readings as a list", "Sensors and text values in a compact list instead of tiles", s.readingsAsList) { set(s.copy(readingsAsList = it)) }
-            SwitchRow("Collapsible sections", null, s.collapsibleSections) { set(s.copy(collapsibleSections = it)) }
-            SwitchRow("Device names on entities", "In tile and list sections", s.showDeviceNames) { set(s.copy(showDeviceNames = it)) }
-            SwitchRow("Configuration and diagnostic entities", "In device sections", s.showConfigDiagnostic) { set(s.copy(showConfigDiagnostic = it)) }
+            Text("Section layout, device names, tap action and all on/off are set on each section (pencil on the section).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             SwitchRow("Summary line", "Lights on, open doors and offline devices", s.summaryLine) { set(s.copy(summaryLine = it)) }
 
             Text("Controls", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-            SwitchRow("Tap tile to toggle", "Lights, switches and fans", s.tapToToggle) { set(s.copy(tapToToggle = it)) }
-            SwitchRow("Controls sheet", "Long-press a tile or tap its name for all controls", s.controlsSheet) { set(s.copy(controlsSheet = it)) }
             SwitchRow("Brightness percentage", null, s.brightnessPercent) { set(s.copy(brightnessPercent = it)) }
             SwitchRow("Spinner until confirmed", "While a command waits for the device", s.pendingSpinner) { set(s.copy(pendingSpinner = it)) }
 

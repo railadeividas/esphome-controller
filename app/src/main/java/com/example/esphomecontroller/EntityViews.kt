@@ -22,6 +22,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
 import com.example.esphomecontroller.api.*
 
 private fun Platform.icon(): ImageVector = when (this) {
@@ -161,6 +163,60 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
     }
 }
 
+/**
+ * Small dashboard tile: icon, name and state, no inline controls. A tap toggles lights, switches and fans when the
+ * section's tap action is Toggle, and otherwise opens all controls ([onOpen]); a long-press always opens them.
+ */
+@Composable
+fun CompactTile(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null) {
+    val style = LocalEntityStyle.current
+    var pending by remember(entity.stableId) { mutableStateOf(false) }
+    LaunchedEffect(live?.state) { pending = false }
+    LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
+    val p = entity.platform
+    val tapToggle = style.tapToToggle && p.isToggle && overlay == null
+    val on = isOn(entity.state) == true
+    val gestures = if (overlay != null || (onOpen == null && !tapToggle)) Modifier else Modifier.pointerInput(onOpen, tapToggle, send.ready, isOn(live?.state)) {
+        detectTapGestures(
+            onTap = { if (tapToggle) send(Command.SetOn(isOn(live?.state) != true)) else onOpen?.invoke() },
+            onLongPress = if (onOpen != null) { _ -> onOpen() } else null,
+        )
+    }
+    val colors = if (p.isToggle && on) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else appCardColors()
+    Card(modifier.heightIn(min = 64.dp).then(gestures), shape = AppCardShape, colors = colors, elevation = appCardElevation()) {
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(24.dp),
+                    tint = if (p.isToggle && !on) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entity.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(compactState(entity, style.brightnessPercent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                if (pending) CircularProgressIndicator(Modifier.padding(start = 6.dp).size(14.dp), strokeWidth = 2.dp)
+            }
+            overlay?.invoke(this)
+        }
+    }
+}
+
+/** One-line state for a compact tile: on/off with brightness for lights, otherwise the formatted value. */
+private fun compactState(entity: Entity, brightnessPercent: Boolean): String {
+    val p = entity.platform
+    if (p.isToggle) {
+        val base = onOffText(entity)
+        val b = (entity.state as? EntityState.Light)?.brightness
+        return if (brightnessPercent && isOn(entity.state) == true && b != null && (p as? Platform.Light)?.supportsBrightness == true) "$base · ${(b * 100).roundToInt()}%" else base
+    }
+    return when (p) {
+        is Platform.Unsupported -> "${p.platform} · not supported yet"
+        Platform.Button -> "Button"
+        else -> displayValue(entity) ?: "—"
+    }
+}
+
 /** Compact row for read-only values (sensors, binary and text sensors) in the dashboard's list card. */
 @Composable
 fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
@@ -173,6 +229,48 @@ fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit
         }
         Text(displayValue(entity) ?: "—", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
         trailing?.invoke()
+    }
+}
+
+/**
+ * Compact dashboard list row for controllable entities: icon, name and one main control on the right
+ * (switch, select, press button, or the current value). Secondary controls live in the controls sheet ([onOpen]).
+ */
+@Composable
+fun CompactControlRow(entity: Entity, session: ControlSession?, live: Entity?, deviceLabel: String? = null, onOpen: (() -> Unit)? = null) {
+    val style = LocalEntityStyle.current
+    var pending by remember(entity.stableId) { mutableStateOf(false) }
+    LaunchedEffect(live?.state) { pending = false }
+    LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
+    val p = entity.platform
+    val tapToggle = style.tapToToggle && p.isToggle
+    val click = when {
+        tapToggle -> Modifier.clickable(enabled = send.ready) { send(Command.SetOn(isOn(live?.state) != true)) }
+        onOpen != null -> Modifier.clickable(onClick = onOpen)
+        else -> Modifier
+    }
+    val longPress = if (tapToggle && onOpen != null) Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) } else Modifier
+    Row(Modifier.fillMaxWidth().then(longPress).then(click).heightIn(min = 44.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(entity.name, style = MaterialTheme.typography.bodyMedium)
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        if (pending) CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(16.dp), strokeWidth = 2.dp)
+        when (p) {
+            is Platform.Light, Platform.Switch, is Platform.Fan -> {
+                (entity.state as? EntityState.Light)?.brightness?.takeIf { isOn(entity.state) == true && (p as? Platform.Light)?.supportsBrightness == true }?.let {
+                    Text("${(it * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
+                }
+                Switch(checked = isOn(entity.state) == true, enabled = send.ready, onCheckedChange = { send(Command.SetOn(it)) })
+            }
+            is Platform.Select -> SelectControl(entity, live, send)
+            Platform.Button -> PressButton(entity, send)
+            is Platform.Unsupported -> UnsupportedCaption(p)
+            else -> Text(displayValue(entity) ?: "—", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
+        }
     }
 }
 

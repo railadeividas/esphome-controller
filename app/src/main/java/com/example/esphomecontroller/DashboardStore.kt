@@ -17,41 +17,64 @@ data class ItemRef(val deviceId: String, val stableId: String)
 enum class SectionType(val label: String, val description: String) {
     TILES("Tiles", "Chosen entities as tiles"),
     LIST("List", "Chosen entities as compact rows"),
+    COMPACT("Compact tiles", "Chosen entities as small tiles with icon, name and state"),
     DEVICE("Device", "All entities of one device, kept up to date automatically"),
     HEADING("Heading", "A title or note between sections"),
+}
+
+/** Section title sizes, largest first. */
+enum class TitleSize(val label: String) { H1("H1"), H2("H2"), H3("H3"), H4("H4") }
+
+enum class TapAction(val label: String, val description: String) {
+    CONTROLS("Open controls", "Long-press a tile, tap its name or tap a row for all controls"),
+    TOGGLE("Toggle", "Tap a light, switch or fan to toggle it; long-press for all controls"),
+    NONE("Nothing", "Only the controls on the tile or row"),
 }
 
 data class Section(
     val id: String = UUID.randomUUID().toString(),
     val type: SectionType,
     val title: String = "",
-    /** Entities shown by [SectionType.TILES] and [SectionType.LIST] sections, in order. */
+    /** Entities shown by sections with [hasChosenItems], in order. */
     val items: List<ItemRef> = emptyList(),
     /** The device followed by a [SectionType.DEVICE] section. */
     val deviceId: String? = null,
-    /** Body text of a [SectionType.HEADING]. */
+    /** Optional text under the title, for every section type. */
     val text: String = "",
     val collapsed: Boolean = false,
-)
-
-/** Per-dashboard presentation options; every dashboard feature is configured here. */
-data class DashboardSettings(
-    /** 0 = automatic (2 on phones, 4 on wide screens). */
+    /** The header has a collapse arrow (not for headings). */
+    val collapsible: Boolean = true,
+    /** Tile columns for tile and device sections; 0 = automatic (2 on phones, 4 on wide screens). */
     val columns: Int = 0,
-    /** Show sensors, binary and text sensors of tile and device sections as a compact list instead of tiles. */
+    /** In tile and device sections, sensors, binary and text sensors go to a compact list under the tiles. */
     val readingsAsList: Boolean = true,
-    val collapsibleSections: Boolean = true,
-    /** Label entities in tile and list sections with their device name. */
+    /** Label entities of tile and list sections with their device name. */
     val showDeviceNames: Boolean = true,
-    /** Include configuration and diagnostic entities in device sections. */
-    val showConfigDiagnostic: Boolean = true,
+    /** Include configuration entities in a device section. */
+    val showConfig: Boolean = true,
+    /** Include diagnostic entities in a device section. */
+    val showDiagnostic: Boolean = true,
+    /** Title size; null uses the type's default ([titleSizeOrDefault]). */
+    val titleSize: TitleSize? = null,
+    /** What tapping a tile or row does. */
+    val tapAction: TapAction = TapAction.CONTROLS,
+    /** An all on / all off button in the header when the section has lights, switches or fans. */
+    val allOnOff: Boolean = true,
+) {
+    val hasEntities: Boolean get() = type != SectionType.HEADING
+    val titleSizeOrDefault: TitleSize get() = titleSize ?: if (type == SectionType.HEADING) TitleSize.H3 else TitleSize.H4
+    val hasTiles: Boolean get() = type == SectionType.TILES || type == SectionType.COMPACT || type == SectionType.DEVICE
+    /** Tiles, list and compact tiles hold the same chosen entities, so the style can change at any time. */
+    val hasChosenItems: Boolean get() = type in CHOSEN_ITEM_TYPES
+
+    companion object { val CHOSEN_ITEM_TYPES = listOf(SectionType.TILES, SectionType.LIST, SectionType.COMPACT) }
+}
+
+/** Options for the whole dashboard; layout and content options belong to each [Section]. */
+data class DashboardSettings(
     val brightnessPercent: Boolean = true,
     /** Dim entities of offline devices and show when they were last seen. */
     val dimOffline: Boolean = true,
-    /** Long-press a tile or tap its name for all of its controls. */
-    val controlsSheet: Boolean = true,
-    /** Tap anywhere on a light, switch or fan tile to toggle it. */
-    val tapToToggle: Boolean = false,
     /** Show a spinner on a tile until the device reports the commanded state. */
     val pendingSpinner: Boolean = true,
     /** Command failures as a snackbar with Retry; otherwise as text under the section. */
@@ -194,34 +217,53 @@ object DashboardCodec {
         .put("settings", encodeSettings(d.settings))
 
     fun decode(o: JSONObject): Dashboard {
-        val sections = o.optJSONArray("sections")?.let { a -> (0 until a.length()).mapNotNull { i -> runCatching { decodeSection(a.getJSONObject(i)) }.getOrNull() } }.orEmpty()
+        // Saves from before section options kept them in the dashboard settings; those become each section's starting values.
+        val legacy = o.optJSONObject("settings")
+        val sections = o.optJSONArray("sections")?.let { a -> (0 until a.length()).mapNotNull { i -> runCatching { decodeSection(a.getJSONObject(i), legacy) }.getOrNull() } }.orEmpty()
         return Dashboard(o.getString("id"), o.optString("name", "Dashboard"), sections, decodeSettings(o.optJSONObject("settings")))
     }
 
     private fun encodeSection(s: Section) = JSONObject().put("id", s.id).put("type", s.type.name).put("title", s.title).put("text", s.text)
         .put("collapsed", s.collapsed).put("deviceId", s.deviceId ?: JSONObject.NULL)
+        .put("collapsible", s.collapsible).put("columns", s.columns).put("readingsAsList", s.readingsAsList)
+        .put("showDeviceNames", s.showDeviceNames).put("showConfig", s.showConfig).put("showDiagnostic", s.showDiagnostic)
+        .put("tapAction", s.tapAction.name).put("titleSize", s.titleSize?.name ?: JSONObject.NULL).put("allOnOff", s.allOnOff)
         .put("items", JSONArray().apply { s.items.forEach { put(JSONObject().put("deviceId", it.deviceId).put("stableId", it.stableId)) } })
 
-    private fun decodeSection(o: JSONObject): Section {
+    private fun decodeSection(o: JSONObject, legacy: JSONObject? = null): Section {
         val items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { ItemRef(it.getString("deviceId"), it.getString("stableId")) } } }.orEmpty()
+        val d = Section(id = "", type = SectionType.HEADING)
+        fun bool(key: String, legacyKey: String, default: Boolean) = o.optBoolean(key, legacy?.optBoolean(legacyKey, default) ?: default)
         return Section(o.getString("id"), SectionType.valueOf(o.getString("type")), o.optString("title"), items,
-            if (o.has("deviceId") && !o.isNull("deviceId")) o.getString("deviceId") else null, o.optString("text"), o.optBoolean("collapsed"))
+            if (o.has("deviceId") && !o.isNull("deviceId")) o.getString("deviceId") else null, o.optString("text"), o.optBoolean("collapsed"),
+            collapsible = bool("collapsible", "collapsibleSections", d.collapsible),
+            columns = o.optInt("columns", legacy?.optInt("columns", d.columns) ?: d.columns),
+            readingsAsList = bool("readingsAsList", "readingsAsList", d.readingsAsList),
+            showDeviceNames = bool("showDeviceNames", "showDeviceNames", d.showDeviceNames),
+            showConfig = bool("showConfig", "showConfigDiagnostic", d.showConfig),
+            showDiagnostic = bool("showDiagnostic", "showConfigDiagnostic", d.showDiagnostic),
+            tapAction = o.optString("tapAction").let { name -> TapAction.entries.firstOrNull { it.name == name } } ?: when {
+                legacy?.optBoolean("tapToToggle") == true -> TapAction.TOGGLE
+                legacy?.optBoolean("controlsSheet", true) == false -> TapAction.NONE
+                else -> d.tapAction
+            },
+            allOnOff = o.optBoolean("allOnOff", d.allOnOff),
+            titleSize = if (o.isNull("titleSize")) null else TitleSize.entries.firstOrNull { it.name == o.optString("titleSize") },
+        )
     }
 
-    private fun encodeSettings(s: DashboardSettings) = JSONObject().put("columns", s.columns).put("readingsAsList", s.readingsAsList)
-        .put("collapsibleSections", s.collapsibleSections).put("showDeviceNames", s.showDeviceNames).put("showConfigDiagnostic", s.showConfigDiagnostic)
-        .put("brightnessPercent", s.brightnessPercent).put("dimOffline", s.dimOffline).put("controlsSheet", s.controlsSheet).put("tapToToggle", s.tapToToggle)
+    private fun encodeSettings(s: DashboardSettings) = JSONObject()
+        .put("brightnessPercent", s.brightnessPercent).put("dimOffline", s.dimOffline)
         .put("pendingSpinner", s.pendingSpinner).put("snackbarErrors", s.snackbarErrors).put("summaryLine", s.summaryLine).put("pullToRefresh", s.pullToRefresh)
 
     private fun decodeSettings(o: JSONObject?): DashboardSettings {
         val d = DashboardSettings()
         if (o == null) return d
         return DashboardSettings(
-            o.optInt("columns", d.columns), o.optBoolean("readingsAsList", d.readingsAsList), o.optBoolean("collapsibleSections", d.collapsibleSections),
-            o.optBoolean("showDeviceNames", d.showDeviceNames), o.optBoolean("showConfigDiagnostic", d.showConfigDiagnostic), o.optBoolean("brightnessPercent", d.brightnessPercent),
-            o.optBoolean("dimOffline", d.dimOffline), o.optBoolean("controlsSheet", d.controlsSheet), o.optBoolean("tapToToggle", d.tapToToggle),
-            o.optBoolean("pendingSpinner", d.pendingSpinner), o.optBoolean("snackbarErrors", d.snackbarErrors), o.optBoolean("summaryLine", d.summaryLine),
-            o.optBoolean("pullToRefresh", d.pullToRefresh),
+            brightnessPercent = o.optBoolean("brightnessPercent", d.brightnessPercent),
+            dimOffline = o.optBoolean("dimOffline", d.dimOffline),
+            pendingSpinner = o.optBoolean("pendingSpinner", d.pendingSpinner), snackbarErrors = o.optBoolean("snackbarErrors", d.snackbarErrors),
+            summaryLine = o.optBoolean("summaryLine", d.summaryLine), pullToRefresh = o.optBoolean("pullToRefresh", d.pullToRefresh),
         )
     }
 }
