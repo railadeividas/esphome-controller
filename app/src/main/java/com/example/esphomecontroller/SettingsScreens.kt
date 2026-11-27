@@ -190,6 +190,8 @@ private fun AboutSettings(onBack: () -> Unit) {
                 SettingsDivider()
                 SettingsRow(Icons.Default.Build, AboutColor, "Build", "${BuildConfig.VERSION_CODE} · ${BuildConfig.GIT_COMMIT}")
                 SettingsDivider()
+                SettingsRow(Icons.Default.Event, AboutColor, "Build date", buildDate())
+                SettingsDivider()
                 SettingsRow(Icons.Default.Lock, AboutColor, "Encrypted connections", if (Build.VERSION.SDK_INT >= 33) "Supported on this device" else "Need Android 13 or newer")
             }
         }
@@ -260,3 +262,7 @@ private fun themeLabel(theme: String) = when (theme) { "light" -> "Light"; "dark
 
 /** Version injected at build time (release tag in CI, `git describe` locally). */
 private fun appVersion(): String = BuildConfig.VERSION_NAME
+
+/** When this APK was built, in the phone's time zone and date format. */
+private fun buildDate(): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(BuildConfig.BUILD_TIME))

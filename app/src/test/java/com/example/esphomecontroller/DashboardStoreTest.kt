@@ -57,7 +57,7 @@ class DashboardStoreTest {
             Section("s5", SectionType.LIST, "Plain", showDeviceNames = false, tapAction = TapAction.NONE, titleColor = TitleColor.AMBER, icon = "sofa"),
             Section("s7", SectionType.TILES, "Tuned", titleColor = TitleColor.CUSTOM, customColor = 0xFF7FA8F0.toInt()),
             Section("s6", SectionType.COMPACT, "Small", listOf(ItemRef("stairs", "switch:0:2")), text = "Hall", columns = 4, titleSize = TitleSize.H2),
-        ), DashboardSettings(summaryLine = true, pullToRefresh = false, brightnessPercent = false))
+        ), DashboardSettings(summaryLine = true, pullToRefresh = false, brightnessPercent = false, showDescription = false), description = "Living room and kitchen")
         assertEquals(d, DashboardCodec.decode(JSONObject(DashboardCodec.encode(d).toString())))
         // Missing settings fall back to defaults; unknown section types are skipped.
         val partial = JSONObject("""{"id":"x","name":"Old","sections":[{"id":"a","type":"FUTURE"},{"id":"b","type":"HEADING","title":"Hi"}]}""")

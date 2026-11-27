@@ -56,7 +56,7 @@ fun NewDashboardDialog(store: LocationStore, onDismiss: () -> Unit, onCreate: (S
                 RadioRow(template == DashboardTemplate.ByType, "Grouped by type", "Lights, switches, climate… across all devices, plus readings") { template = DashboardTemplate.ByType }
             }
         },
-        confirmButton = { TextButton(onClick = { onCreate(name, template) }) { Text("Create") } },
+        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onCreate(name.trim(), template) }) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -188,16 +188,19 @@ private fun SwitchRow(label: String, description: String? = null, checked: Boole
 @Composable
 fun DashboardSettingsSheet(board: Dashboard, dashboards: DashboardStore, onDismiss: () -> Unit) {
     var name by remember(board.id) { mutableStateOf(board.name) }
+    var description by remember(board.id) { mutableStateOf(board.description) }
     val s = board.settings
     fun set(change: DashboardSettings) = dashboards.updateSettings(board.id, change)
-    ModalBottomSheet(onDismissRequest = { dashboards.rename(board.id, name); onDismiss() }) {
+    ModalBottomSheet(onDismissRequest = { dashboards.rename(board.id, name); dashboards.setDescription(board.id, description); onDismiss() }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Dashboard settings", style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(description, { description = it }, label = { Text("Description") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             SwitchRow("Default dashboard", "Opens when the app starts", board.id == dashboards.defaultId) { if (it) dashboards.setDefault(board.id) }
 
             Text("Section layout, device names, tap action and all on/off are set on each section (pencil on the section).",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            SwitchRow("Show description", "Under the dashboard name", s.showDescription) { set(s.copy(showDescription = it)) }
             SwitchRow("Summary line", "Lights on, open doors and offline devices", s.summaryLine) { set(s.copy(summaryLine = it)) }
 
             Text("Controls", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))

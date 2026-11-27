@@ -1,5 +1,6 @@
 package com.example.esphomecontroller
 
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,7 +41,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember(board.id) { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var creating by remember { mutableStateOf(false) }
     var addingSection by remember(board.id) { mutableStateOf(false) }
     var editingSection by remember(board.id) { mutableStateOf<Section?>(null) }
     var picking by remember(board.id) { mutableStateOf<Section?>(null) }
@@ -62,7 +62,11 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         // Top bar: dashboard switcher, edit and settings.
         ScreenHeader(
             title = board.name,
-            subtitle = if (settings.summaryLine && !editing) summaryText(board, store, manager) else null,
+            // "Description · Summary", each part only when enabled; the summary is hidden while editing.
+            subtitle = listOfNotNull(
+                board.description.takeIf { settings.showDescription && it.isNotBlank() },
+                if (settings.summaryLine && !editing) summaryText(board, store, manager).takeIf { it.isNotBlank() } else null,
+            ).joinToString(" · ").ifEmpty { null },
             onTitleClick = { menuOpen = true },
             titleMenu = {
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -74,7 +78,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
                         )
                     }
                     HorizontalDivider()
-                    DropdownMenuItem(text = { Text("New dashboard") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { menuOpen = false; creating = true })
                     DropdownMenuItem(text = { Text("Manage dashboards") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuOpen = false; onManageDashboards() })
                 }
             },
@@ -117,11 +120,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         }
     }
 
-    if (creating) NewDashboardDialog(store, onDismiss = { creating = false }) { name, template ->
-        creating = false
-        dashboards.create(name, template, store, { manager.entities(it) }, { manager.details(it)?.area })
-        editing = template == DashboardTemplate.Empty
-    }
     if (showSettings) DashboardSettingsSheet(board, dashboards, onDismiss = { showSettings = false })
     if (addingSection) SectionDialog(null, store, onDismiss = { addingSection = false }) { section ->
         addingSection = false
@@ -178,7 +176,8 @@ private fun SectionView(
             onRemove = { dashboards.removeItem(board.id, section.id, r.ref) },
         )
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // The section's top lines up with the first card on other pages; the header buttons' extra height goes below the section instead.
+    Column(Modifier.padding(bottom = HeaderButtonOverhang), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 val title = section.title
@@ -194,7 +193,7 @@ private fun SectionView(
                     else -> if (editing) Text("${section.type.label} · ${section.items.size} entities", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (editing) {
+            Row(Modifier.compactHeight(), verticalAlignment = Alignment.CenterVertically) { if (editing) {
                 IconButton(enabled = index > 0, onClick = { dashboards.moveSection(board.id, section.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
                 IconButton(enabled = index < board.sections.lastIndex, onClick = { dashboards.moveSection(board.id, section.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit section") }
@@ -209,7 +208,7 @@ private fun SectionView(
                 if (section.collapsible && section.hasEntities) IconButton(onClick = { dashboards.toggleCollapsed(board.id, section.id) }) {
                     Icon(Icons.Default.ExpandMore, if (collapsed) "Expand" else "Collapse", Modifier.rotate(if (collapsed) -90f else 0f))
                 }
-            }
+            } }
         }
         if (!collapsed) CompositionLocalProvider(LocalEntityStyle provides LocalEntityStyle.current.copy(tapToToggle = section.tapAction == TapAction.TOGGLE && !editing)) {
             when (section.type) {
@@ -328,4 +327,14 @@ private fun EntitySheet(device: LocationStore.Device, entity: Entity, session: C
             if (!session.isConnected) Text("Controls are available when the device is connected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** How far a 48 dp icon button reaches above and below its 24 dp icon. */
+private val HeaderButtonOverhang = 12.dp
+
+/** Lays the header buttons out as tall as their icons, so they don't push the section title down; their touch targets keep the full size. */
+private fun Modifier.compactHeight() = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minHeight = 0))
+    val height = (placeable.height - 2 * HeaderButtonOverhang.roundToPx()).coerceAtLeast(0)
+    layout(placeable.width, height) { placeable.place(0, (height - placeable.height) / 2) }
 }
