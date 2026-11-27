@@ -25,11 +25,11 @@ class HeaderNavigation(val icon: ImageVector, val description: String, val onCli
     }
 }
 
-/** Width the header reaches past the page's 16 dp side padding, so its icons sit 16 dp from the screen edge like a Material top bar. */
-private val HeaderBleed = 12.dp
+/** The side padding AppScreen gives every page. */
+private val PagePadding = 16.dp
 
 /**
- * The header every page uses: a 64 dp bar with an optional back/close button, a titleLarge title
+ * The header every page uses: a 64 dp bar, separated from the content by a full-width divider, with an optional back/close button, a titleLarge title
  * with an optional one-line subtitle, and trailing actions (icon buttons, or a text button to confirm).
  * With [onTitleClick] the title shows a drop-down arrow and [titleMenu] is anchored to it.
  */
@@ -43,18 +43,16 @@ fun ScreenHeader(
     titleMenu: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    Row(
-        Modifier
-            .layout { measurable, constraints ->
-                val bleed = HeaderBleed.roundToPx()
-                val placeable = measurable.measure(constraints.copy(minWidth = constraints.maxWidth + 2 * bleed, maxWidth = constraints.maxWidth + 2 * bleed))
-                layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
-            }
-            .height(64.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    // The header reaches past the page's 16 dp side padding: the divider spans the screen, icons sit 16 dp from its edges.
+    Column(Modifier.layout { measurable, constraints ->
+        val bleed = PagePadding.roundToPx()
+        val width = constraints.maxWidth + 2 * bleed
+        val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+        layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
+    }) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(64.dp), verticalAlignment = Alignment.CenterVertically) {
         if (navigation != null) IconButton(onClick = navigation.onClick) { Icon(navigation.icon, contentDescription = navigation.description) }
-        else Spacer(Modifier.width(HeaderBleed + 4.dp))
+        else Spacer(Modifier.width(PagePadding - 4.dp))
         Box(Modifier.weight(1f).padding(end = 4.dp)) {
             Column(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -69,7 +67,8 @@ fun ScreenHeader(
             titleMenu()
         }
         actions()
-        Spacer(Modifier.width(4.dp))
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
     }
 }
 
