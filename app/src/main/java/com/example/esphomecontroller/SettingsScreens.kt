@@ -10,6 +10,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -30,6 +32,8 @@ private val DashboardsColor = Color(0xFF3D7BF4)
 private val LocationsColor = Color(0xFF2FA866)
 private val AppearanceColor = Color(0xFF8B5CF6)
 private val AboutColor = Color(0xFF7A7785)
+
+private const val SourceRepoUrl = "https://github.com/railadeividas/esphome-controller"
 
 @Composable
 fun SettingsScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, page: SettingsPage?, onOpen: (SettingsPage?) -> Unit) {
@@ -191,6 +195,15 @@ private fun AboutSettings(onBack: () -> Unit) {
                 SettingsRow(Icons.Default.Build, AboutColor, "Build", "${BuildConfig.VERSION_CODE} · ${BuildConfig.GIT_COMMIT}")
                 SettingsDivider()
                 SettingsRow(Icons.Default.Event, AboutColor, "Build date", buildDate())
+                SettingsDivider()
+                val uriHandler = LocalUriHandler.current
+                SettingsRow(
+                    Icons.Default.Code, AboutColor, "Source code", SourceRepoUrl.removePrefix("https://"),
+                    // No browser installed: nothing to open, so ignore the tap.
+                    onClick = { runCatching { uriHandler.openUri(SourceRepoUrl) } },
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open in browser", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 SettingsDivider()
                 SettingsRow(Icons.Default.Lock, AboutColor, "Encrypted connections", if (Build.VERSION.SDK_INT >= 33) "Supported on this device" else "Need Android 13 or newer")
             }

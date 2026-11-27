@@ -162,14 +162,14 @@ private fun SectionOptions(s: Section, onChange: (Section) -> Unit) {
                 FilterChip(selected = s.columns == value, onClick = { onChange(s.copy(columns = value)) }, label = { Text(label) })
             }
         }
-        SwitchRow("Readings as a list", "Sensors and text values in a compact list under the tiles", s.readingsAsList) { onChange(s.copy(readingsAsList = it)) }
     }
+    Text("Tap action", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+    TapAction.entries.forEach { a -> RadioRow(s.tapAction == a, a.label, a.description) { onChange(s.copy(tapAction = a)) } }
+    if (s.tapAction != TapAction.NONE) SwitchRow("Link to device page", "The device row in the controls opens the device's page", s.deviceLink) { onChange(s.copy(deviceLink = it)) }
     if (s.hasChosenItems) SwitchRow("Device names", "Under each entity name", s.showDeviceNames) { onChange(s.copy(showDeviceNames = it)) }
     SwitchRow("All on / all off button", "When the section has lights, switches or fans", s.allOnOff) { onChange(s.copy(allOnOff = it)) }
     SwitchRow("Collapsible", null, s.collapsible) { onChange(s.copy(collapsible = it)) }
-    if (s.allOnOff && s.collapsible) SwitchRow("Keep all on / all off when collapsed", "The button stays in the header of a collapsed section", s.allOnOffWhenCollapsed) { onChange(s.copy(allOnOffWhenCollapsed = it)) }
-    Text("Tap action", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
-    TapAction.entries.forEach { a -> RadioRow(s.tapAction == a, a.label, a.description) { onChange(s.copy(tapAction = a)) } }
+    if (s.hasTiles) SwitchRow("Readings as a list", "Sensors and text values in a compact list under the tiles", s.readingsAsList) { onChange(s.copy(readingsAsList = it)) }
 }
 
 @Composable

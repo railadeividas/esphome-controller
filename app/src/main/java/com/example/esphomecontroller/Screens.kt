@@ -113,7 +113,7 @@ fun deviceIcon(entities: List<Entity>): ImageVector = if (entities.any { it.plat
 
 /** Device icon in a filled circle (like the Settings icons), with a connection badge on its corner. */
 @Composable
-private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = ListIconSize) {
+fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = ListIconSize) {
     Box(Modifier.size(size)) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(size * 0.58f))

@@ -1,7 +1,10 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.example.esphomecontroller
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
@@ -16,7 +19,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -95,9 +100,25 @@ fun entityIcon(entity: Entity): ImageVector {
  * Material icon from [entityIcon]. [modifier] may add padding; the icon itself is [size].
  */
 @Composable
-fun EntityIcon(entity: Entity, modifier: Modifier = Modifier, size: Dp = 24.dp, tint: Color = MaterialTheme.colorScheme.primary) {
+fun EntityIcon(entity: Entity, modifier: Modifier = Modifier, size: Dp = 24.dp, tint: Color = entityTint(entity)) {
     val mdi = Mdi.find(entity.icon)
     if (mdi != null) MdiGlyph(mdi, size, modifier, tint) else Icon(entityIcon(entity), contentDescription = null, modifier = modifier.size(size), tint = tint)
+}
+
+/**
+ * Icon colour that shows on/off at a glance, like Home Assistant: lights and switches amber when on, fans cyan,
+ * grey when off or unknown. Entities without on/off use the theme's primary colour.
+ */
+@Composable
+fun entityTint(entity: Entity): Color {
+    val p = entity.platform
+    if (!p.isToggle) return MaterialTheme.colorScheme.primary
+    if (isOn(entity.state) != true) return MaterialTheme.colorScheme.onSurfaceVariant
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return when (p) {
+        is Platform.Fan -> if (dark) Color(0xFF26C6DA) else Color(0xFF00ACC1)
+        else -> if (dark) Color(0xFFFFC107) else Color(0xFFF9A825)
+    }
 }
 
 /** The card look used across the app: theme surface (not Material's default grey), 16 dp corners, 1 dp elevation. */
@@ -133,9 +154,11 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
     val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
     val tapToggle = style.tapToToggle && p.isToggle && overlay == null
+    // Tap: toggle (section tap action Toggle, lights, switches and fans) or open all controls; long-press: all controls.
+    // Inline controls (power button, sliders, buttons) handle their own touches first.
     val gestures = if (onOpen == null && !tapToggle) Modifier else Modifier.pointerInput(onOpen, tapToggle, send.ready, isOn(live?.state)) {
         detectTapGestures(
-            onTap = if (tapToggle) { _ -> send(Command.SetOn(isOn(live?.state) != true)) } else null,
+            onTap = { if (tapToggle) send(Command.SetOn(isOn(live?.state) != true)) else onOpen?.invoke() },
             onLongPress = if (onOpen != null) { _ -> onOpen() } else null,
         )
     }
@@ -143,17 +166,19 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
       Box {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                EntityIcon(entity, size = 30.dp)
+                EntityIcon(entity, size = TileIconSize)
                 if (p.isToggle) {
                     Spacer(Modifier.weight(1f))
-                    PowerButton(entity, live, send)
+                    // Laid out at icon height and overhanging the row, so toggle tiles line up with tiles without a button;
+                    // shifted right by the same overhang so the gap to the card's right edge matches the gap above it.
+                    Box(Modifier.layoutHeight(TileIconSize).offset(x = (48.dp - TileIconSize) / 2)) { PowerButton(entity, live, send) }
                 } else if (p.showsValue) {
                     Spacer(Modifier.width(8.dp))
                     Text(displayValue(entity) ?: "—", textAlign = TextAlign.End, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 }
             }
-            Text(entity.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, modifier = if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
-            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Text(entity.name, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             when (p) {
                 is Platform.Light -> if (p.supportsBrightness && (entity.state as? EntityState.Light)?.brightness != null) BrightnessSlider(entity, send) else Caption(onOffText(entity))
                 Platform.Switch -> Caption(onOffText(entity))
@@ -176,7 +201,7 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
 }
 
 /**
- * Small dashboard tile: icon, name and state, no inline controls. A tap toggles lights, switches and fans when the
+ * Small dashboard tile: icon, name, device name and state (always the last line, like big tiles), no inline controls. A tap toggles lights, switches and fans when the
  * section's tap action is Toggle, and otherwise opens all controls ([onOpen]); a long-press always opens them.
  */
 @Composable
@@ -199,12 +224,12 @@ fun CompactTile(entity: Entity, session: ControlSession?, live: Entity?, modifie
     Card(modifier.heightIn(min = 64.dp).then(gestures), shape = AppCardShape, colors = colors, elevation = appCardElevation()) {
         Box(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                EntityIcon(entity, size = 24.dp, tint = if (p.isToggle && !on) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                EntityIcon(entity, size = 24.dp)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(entity.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    deviceLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     Text(compactState(entity, style.brightnessPercent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
                 if (pending) CircularProgressIndicator(Modifier.padding(start = 6.dp).size(14.dp), strokeWidth = 2.dp)
             }
@@ -231,12 +256,12 @@ private fun compactState(entity: Entity, brightnessPercent: Boolean): String {
 /** Compact row for read-only values (sensors, binary and text sensors) in the dashboard's list card. */
 @Composable
 fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.combinedClickable(onLongClick = onOpen, onClick = onOpen) else Modifier).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         EntityIcon(entity, size = 22.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(entity.name, style = MaterialTheme.typography.bodyMedium)
-            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Text(displayValue(entity) ?: "—", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
         trailing?.invoke()
@@ -256,18 +281,18 @@ fun CompactControlRow(entity: Entity, session: ControlSession?, live: Entity?, d
     val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
     val tapToggle = style.tapToToggle && p.isToggle
+    // One handler for tap and long-press, so a long-press opens the controls without also toggling.
     val click = when {
-        tapToggle -> Modifier.clickable(enabled = send.ready) { send(Command.SetOn(isOn(live?.state) != true)) }
-        onOpen != null -> Modifier.clickable(onClick = onOpen)
+        tapToggle -> Modifier.combinedClickable(onLongClick = onOpen) { send(Command.SetOn(isOn(live?.state) != true)) }
+        onOpen != null -> Modifier.combinedClickable(onLongClick = onOpen, onClick = onOpen)
         else -> Modifier
     }
-    val longPress = if (tapToggle && onOpen != null) Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) } else Modifier
-    Row(Modifier.fillMaxWidth().then(longPress).then(click).heightIn(min = 44.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().then(click).heightIn(min = 44.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         EntityIcon(entity, size = 22.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(entity.name, style = MaterialTheme.typography.bodyMedium)
-            deviceLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            deviceLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (pending) CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(16.dp), strokeWidth = 2.dp)
         when (p) {
@@ -360,6 +385,15 @@ private fun LabeledRow(label: String, content: @Composable () -> Unit) {
     }
 }
 
+private val TileIconSize = 30.dp
+
+/** Reports [height] to the parent while drawing the content at its own size, centred (it may overhang). */
+private fun Modifier.layoutHeight(height: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minHeight = 0))
+    val h = height.roundToPx()
+    layout(placeable.width, h) { placeable.place(0, (h - placeable.height) / 2) }
+}
+
 @Composable
 private fun PowerButton(entity: Entity, live: Entity?, send: Sender) {
     val on = isOn(entity.state) == true
@@ -373,15 +407,22 @@ private fun PowerButton(entity: Entity, live: Entity?, send: Sender) {
     ) { Icon(Icons.Default.PowerSettingsNew, contentDescription = if (on) "Turn ${entity.name} off" else "Turn ${entity.name} on") }
 }
 
+/**
+ * Brightness slider with its value on a caption line above it, like number sliders: "Off" or "On · 57%" on tiles,
+ * "Brightness · 57%" in the controls sheet ([label]). The percentage follows the slider while it is dragged.
+ */
 @Composable
-private fun BrightnessSlider(entity: Entity, send: Sender) {
+private fun BrightnessSlider(entity: Entity, send: Sender, label: String? = null) {
     val brightness = (entity.state as? EntityState.Light)?.brightness ?: return
     var slider by remember(entity.stableId, brightness) { mutableFloatStateOf(brightness.coerceIn(0f, 1f)) }
     val on = isOn(entity.state) == true
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.weight(1f))
-        if (LocalEntityStyle.current.brightnessPercent) Text(if (on) "${Math.round(slider * 100)}%" else "Off", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.width(40.dp))
-    }
+    val percent = if (LocalEntityStyle.current.brightnessPercent) "${Math.round(slider * 100)}%" else null
+    Caption(when {
+        label != null -> listOfNotNull(label, percent).joinToString(" · ")
+        on -> listOfNotNull("On", percent).joinToString(" · ")
+        else -> "Off"
+    })
+    Slider(value = slider, enabled = send.ready, onValueChange = { slider = it }, onValueChangeFinished = { send(Command.SetBrightness(slider)) }, modifier = Modifier.fillMaxWidth())
 }
 
 /** A slider that sends only when released, showing a percentage. */
@@ -463,7 +504,7 @@ private fun LockButtons(entity: Entity, p: Platform.Lock, send: Sender, includeO
 @Composable
 private fun LightControls(entity: Entity, p: Platform.Light, send: Sender) {
     val s = entity.state as? EntityState.Light
-    if (p.supportsBrightness && s?.brightness != null) { Caption("Brightness"); BrightnessSlider(entity, send) }
+    if (p.supportsBrightness && s?.brightness != null) BrightnessSlider(entity, send, label = "Brightness")
     if (p.supportsRgb) {
         var hue by remember(entity.stableId, s?.rgb) { mutableFloatStateOf(s?.rgb?.let(::hueOf) ?: 0f) }
         val c = rgbForHue(hue)

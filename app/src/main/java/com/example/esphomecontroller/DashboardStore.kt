@@ -34,9 +34,9 @@ enum class TitleColor(val label: String) {
 }
 
 enum class TapAction(val label: String, val description: String) {
-    CONTROLS("Open controls", "Long-press a tile, tap its name or tap a row for all controls"),
-    TOGGLE("Toggle", "Tap a light, switch or fan to toggle it; long-press for all controls"),
-    NONE("Nothing", "Only the controls on the tile or row"),
+    CONTROLS("Open controls", "Tap or long-press a tile or row for all controls"),
+    TOGGLE("Toggle", "Tap a light, switch or fan to toggle it, anything else for all controls; long-press for all controls"),
+    NONE("Nothing", "Only the controls on the tile or row; no controls sheet"),
 }
 
 data class Section(
@@ -58,17 +58,17 @@ data class Section(
     /** Tile columns for tile sections; 0 = automatic (2 on phones, 4 on wide screens). */
     val columns: Int = 0,
     /** In tile sections, sensors, binary and text sensors go to a compact list under the tiles. */
-    val readingsAsList: Boolean = true,
+    val readingsAsList: Boolean = false,
     /** Label entities of tile and list sections with their device name. */
-    val showDeviceNames: Boolean = true,
+    val showDeviceNames: Boolean = false,
     /** Title size; null uses the type's default ([titleSizeOrDefault]). */
     val titleSize: TitleSize? = null,
     /** What tapping a tile or row does. */
-    val tapAction: TapAction = TapAction.CONTROLS,
-    /** An all on / all off button in the header when the section has lights, switches or fans. */
-    val allOnOff: Boolean = true,
-    /** Keep the all on / all off button in the header while the section is collapsed. */
-    val allOnOffWhenCollapsed: Boolean = true,
+    val tapAction: TapAction = TapAction.NONE,
+    /** The device row at the top of the controls sheet opens the device page. */
+    val deviceLink: Boolean = false,
+    /** An all on / all off button in the header (also while collapsed) when the section has lights, switches or fans. */
+    val allOnOff: Boolean = false,
     /** Colour of the title and its icon. */
     val titleColor: TitleColor = TitleColor.DEFAULT,
     /** RGB of a [TitleColor.CUSTOM] title colour (opaque ARGB int). */
@@ -228,7 +228,7 @@ class DashboardStore(private val prefs: SharedPreferences) {
         /** A tile section of one device's main entities, or one waiting for them when they are not known yet. */
         private fun deviceSection(device: LocationStore.Device, entities: (String) -> List<Entity>): Section {
             val main = mainEntities(device.id, entities(device.id))
-            return Section(type = SectionType.TILES, title = device.name, items = main, showDeviceNames = false, pendingDeviceId = device.id.takeIf { main.isEmpty() })
+            return Section(type = SectionType.TILES, title = device.name, items = main, pendingDeviceId = device.id.takeIf { main.isEmpty() })
         }
 
         fun buildSections(template: DashboardTemplate, devices: List<LocationStore.Device>, entities: (String) -> List<Entity>, area: (String) -> String?): List<Section> {
@@ -279,7 +279,7 @@ object DashboardCodec {
         .put("collapsed", s.collapsed).put("pendingDeviceId", s.pendingDeviceId ?: JSONObject.NULL)
         .put("collapsible", s.collapsible).put("columns", s.columns).put("readingsAsList", s.readingsAsList)
         .put("showDeviceNames", s.showDeviceNames)
-        .put("tapAction", s.tapAction.name).put("titleSize", s.titleSize?.name ?: JSONObject.NULL).put("allOnOff", s.allOnOff).put("allOnOffWhenCollapsed", s.allOnOffWhenCollapsed).put("titleColor", s.titleColor.name).put("customColor", s.customColor?.let { "#%06X".format(it and 0xFFFFFF) } ?: JSONObject.NULL).put("icon", s.icon?.let { "mdi:$it" } ?: JSONObject.NULL)
+        .put("tapAction", s.tapAction.name).put("deviceLink", s.deviceLink).put("titleSize", s.titleSize?.name ?: JSONObject.NULL).put("allOnOff", s.allOnOff).put("titleColor", s.titleColor.name).put("customColor", s.customColor?.let { "#%06X".format(it and 0xFFFFFF) } ?: JSONObject.NULL).put("icon", s.icon?.let { "mdi:$it" } ?: JSONObject.NULL)
         .put("items", JSONArray().apply { s.items.forEach { put(JSONObject().put("deviceId", it.deviceId).put("stableId", it.stableId)) } })
 
     private fun decodeSection(o: JSONObject, legacy: JSONObject? = null): Section {
@@ -300,8 +300,8 @@ object DashboardCodec {
                 legacy?.optBoolean("controlsSheet", true) == false -> TapAction.NONE
                 else -> d.tapAction
             },
+            deviceLink = o.optBoolean("deviceLink", d.deviceLink),
             allOnOff = o.optBoolean("allOnOff", d.allOnOff),
-            allOnOffWhenCollapsed = o.optBoolean("allOnOffWhenCollapsed", d.allOnOffWhenCollapsed),
             titleColor = TitleColor.entries.firstOrNull { it.name == o.optString("titleColor") } ?: d.titleColor,
             customColor = string("customColor")?.removePrefix("#")?.toIntOrNull(16)?.let { it or 0xFF000000.toInt() },
             icon = string("icon")?.let { saved -> if (saved.startsWith("mdi:")) saved.removePrefix("mdi:") else LEGACY_ICON_KEYS[saved] ?: saved },

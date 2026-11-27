@@ -35,7 +35,7 @@ private data class Resolved(val ref: ItemRef, val device: LocationStore.Device?,
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, onManageDashboards: () -> Unit) {
+fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, onManageDashboards: () -> Unit, onOpenDevice: (String) -> Unit) {
     val board = dashboards.selected
     val settings = board.settings
     var menuOpen by remember { mutableStateOf(false) }
@@ -44,7 +44,8 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     var addingSection by remember(board.id) { mutableStateOf(false) }
     var editingSection by remember(board.id) { mutableStateOf<Section?>(null) }
     var picking by remember(board.id) { mutableStateOf<Section?>(null) }
-    var sheet by remember(board.id) { mutableStateOf<ItemRef?>(null) }
+    // The entity whose controls sheet is open, and whether its device row links to the device page.
+    var sheet by remember(board.id) { mutableStateOf<Pair<ItemRef, Boolean>?>(null) }
     // Sections waiting for a device's entities (device templates, old Device sections) fill as soon as they are known.
     val knownEntities = store.devices.map { it.id to manager.entities(it.id).size }
     LaunchedEffect(knownEntities) { dashboards.fillPending({ id -> store.devices.any { it.id == id } }, { manager.entities(it) }) }
@@ -56,7 +57,6 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         val entity = device?.let { manager.entities(it.id).firstOrNull { e -> e.stableId == ref.stableId } }
         return Resolved(ref, device, entity, session, entity?.let { e -> session?.entities?.firstOrNull { sameEntity(it, e) } })
     }
-    val open: (ItemRef) -> Unit = { sheet = it }
 
     CompositionLocalProvider(LocalEntityStyle provides EntityStyle(settings.brightnessPercent, tapToToggle = false, pendingSpinner = settings.pendingSpinner, readOnly = editing)) {
         // Top bar: dashboard switcher, edit and settings.
@@ -96,7 +96,7 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
                 }
                 items(board.sections, key = { it.id }) { section ->
                     SectionView(
-                        section, board, store, dashboards, manager, settings, section.columns.takeIf { it > 0 } ?: autoColumns, editing, ::resolve, open,
+                        section, board, store, dashboards, manager, settings, section.columns.takeIf { it > 0 } ?: autoColumns, editing, ::resolve, { sheet = it to section.deviceLink },
                         onEdit = { editingSection = section }, onPick = { picking = section },
                     )
                 }
@@ -114,9 +114,9 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
             }) { list() }
         } else list()
 
-        sheet?.let { ref ->
+        sheet?.let { (ref, deviceLink) ->
             val r = resolve(ref)
-            if (r.available) EntitySheet(r.device!!, r.entity!!, r.session, r.live) { sheet = null }
+            if (r.available) EntitySheet(store, manager, r.device!!, r.entity!!, r.session, r.live, onOpenDevice = if (deviceLink) { id -> sheet = null; onOpenDevice(id) } else null) { sheet = null }
         }
     }
 
@@ -188,10 +188,6 @@ private fun SectionView(
                     if (title.isNotBlank()) Text(title, style = section.titleSizeOrDefault.textStyle(), color = color)
                 }
                 if (section.text.isNotBlank()) Text(section.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                when (section.type) {
-                    SectionType.HEADING -> Unit
-                    else -> if (editing) Text("${section.type.label} · ${section.items.size} entities", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
             Row(Modifier.compactHeight(), verticalAlignment = Alignment.CenterVertically) { if (editing) {
                 IconButton(enabled = index > 0, onClick = { dashboards.moveSection(board.id, section.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
@@ -199,7 +195,7 @@ private fun SectionView(
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit section") }
                 IconButton(onClick = { dashboards.deleteSection(board.id, section.id) }) { Icon(Icons.Default.Delete, "Delete section") }
             } else {
-                if (section.allOnOff && toggles.isNotEmpty() && (!collapsed || section.allOnOffWhenCollapsed)) {
+                if (section.allOnOff && toggles.isNotEmpty()) {
                     val anyOn = toggles.any { isOn(it.live!!.state) == true }
                     IconButton(onClick = { toggles.forEach { r -> r.session?.send(r.live!!, Command.SetOn(!anyOn)) } }) {
                         Icon(Icons.Default.PowerSettingsNew, if (anyOn) "Turn all off" else "Turn all on", tint = if (anyOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -316,15 +312,29 @@ private fun ItemTools(onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit
     }
 }
 
-/** Full controls for one entity without leaving the dashboard. */
+/**
+ * Full controls for one entity without leaving the dashboard. The top row names the device it belongs to (avatar with
+ * connection badge, location, area and status, like the Devices tab); it opens the device page only when the section's
+ * "Link to device page" option ([Section.deviceLink]) is on.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EntitySheet(device: LocationStore.Device, entity: Entity, session: ControlSession?, live: Entity?, onDismiss: () -> Unit) {
+private fun EntitySheet(
+    store: LocationStore, manager: ConnectionManager, device: LocationStore.Device, entity: Entity, session: ControlSession?, live: Entity?,
+    onOpenDevice: ((String) -> Unit)?, onDismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(device.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            EntityControls(entity, session, live)
-            if (!session.isConnected) Text("Controls are available when the device is connected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+            val setupError = manager.setupErrors[device.id]
+            AppListRow(
+                device.name,
+                listOfNotNull(placeLine(store.locationName(device.locationId), manager.details(device.id)?.area), connectionSummary(session, setupError, manager.lastSeen(device.id))).joinToString(" · "),
+                leading = { DeviceAvatar(deviceIcon(manager.entities(device.id)), session.isConnected) },
+                onClick = onOpenDevice?.let { { it(device.id) } }, chevron = onOpenDevice != null, summaryIsError = setupError != null,
+            )
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+            EntityControls(entity, session, live, Modifier.padding(horizontal = 16.dp), leadingIcon = true)
+            if (!session.isConnected) Text("Controls are available when the device is connected.", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

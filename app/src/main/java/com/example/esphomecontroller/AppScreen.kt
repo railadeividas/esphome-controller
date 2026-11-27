@@ -90,7 +90,7 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                         if (isNew) page = Page.DASHBOARD
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
-                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { settingsPage = SettingsPage.DASHBOARDS; page = Page.SETTINGS })
+                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { settingsPage = SettingsPage.DASHBOARDS; page = Page.SETTINGS }, onOpenDevice = { selectedDevice = it; page = Page.DEVICES })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = store.devices.firstOrNull { it.id == selectedDevice }
