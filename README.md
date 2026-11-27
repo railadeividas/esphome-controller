@@ -6,6 +6,12 @@ An early Android discovery prototype for ESPHome devices. It browses `_esphomeli
 
 Run `./docker/build.sh`. This builds the Android SDK/Gradle image, runs `testDebugUnitTest assembleDebug`, and writes the debug APK to `app/build/outputs/apk/debug/app-debug.apk`. Docker and internet access are required for the first build. The debug signing key is kept in the Gradle cache under /tmp/esphome-gradle-cache; deleting it changes the signing key.
 
+## Releases and versioning
+
+Every push to `main` runs `.github/workflows/release.yml`: it runs the unit tests, builds a signed release APK and publishes a GitHub release `vX.Y.Z` with `esphome-controller-vX.Y.Z.apk` attached and generated notes. The version comes from Conventional Commits since the last `v*` tag (`.github/scripts/next-version.sh`): a breaking change (`type!:` or `BREAKING CHANGE:`) bumps major, `feat` bumps minor, anything else bumps patch; the first release is `0.1.0`. The version code is the commit count on `main`. Both are injected into the APK (`versionName`, `versionCode`, `BuildConfig.GIT_COMMIT`) and shown in Settings › About. Local builds derive the same values from git (`git describe`), or fall back to `0.0.0-dev` and code 1 when git is unavailable (for example in a worktree, whose `.git` is outside the Docker mount).
+
+The release APK is signed with the key in these repository secrets: `ANDROID_KEYSTORE_BASE64` (base64 of the keystore file), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Android only upgrades an installed app signed with the same key, so use one key for good. Without the secrets the workflow still releases, but signs with a throwaway key and warns.
+
 ## Try on a phone
 
 Install the debug APK on an Android phone (for example, with `adb install -r app/build/outputs/apk/debug/app-debug.apk`). Connect the phone and an ESPHome device with the native API and mDNS enabled to the same Wi-Fi network, open the app, and look for the device. Use Refresh or enter its address manually if necessary. mDNS normally does not cross subnets without a reflector.
