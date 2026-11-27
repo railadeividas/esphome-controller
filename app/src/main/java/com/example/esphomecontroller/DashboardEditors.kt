@@ -216,37 +216,3 @@ fun DashboardSettingsSheet(board: Dashboard, dashboards: DashboardStore, onDismi
         }
     }
 }
-
-/** Dashboard management in Settings: create, rename, reorder, default and delete. */
-@Composable
-fun DashboardsSettings(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager) {
-    var creating by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf<Dashboard?>(null) }
-    PageSectionTitle("Dashboards")
-    dashboards.dashboards.forEachIndexed { i, d ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { dashboards.setDefault(d.id) }) {
-                Icon(if (d.id == dashboards.defaultId) Icons.Default.Star else Icons.Outlined.StarOutline, contentDescription = if (d.id == dashboards.defaultId) "Default dashboard" else "Make default", tint = MaterialTheme.colorScheme.primary)
-            }
-            Text(d.name, Modifier.weight(1f).clickable { renaming = d })
-            IconButton(enabled = i > 0, onClick = { dashboards.moveDashboard(d.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
-            IconButton(enabled = i < dashboards.dashboards.lastIndex, onClick = { dashboards.moveDashboard(d.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
-            IconButton(onClick = { renaming = d }) { Icon(Icons.Default.Edit, "Rename") }
-            if (dashboards.dashboards.size > 1) IconButton(onClick = { dashboards.delete(d.id) }) { Icon(Icons.Default.Delete, "Delete") }
-        }
-    }
-    OutlinedButton(onClick = { creating = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("New dashboard") }
-    if (creating) NewDashboardDialog(store, onDismiss = { creating = false }) { name, template ->
-        creating = false; dashboards.create(name, template, store, { manager.entities(it) }, { manager.details(it)?.area })
-    }
-    renaming?.let { d ->
-        var name by remember(d.id) { mutableStateOf(d.name) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text("Rename dashboard") },
-            text = { OutlinedTextField(name, { name = it }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { dashboards.rename(d.id, name); renaming = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { renaming = null }) { Text("Cancel") } },
-        )
-    }
-}

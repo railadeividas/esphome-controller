@@ -77,6 +77,7 @@ class LocationStore(private val prefs: SharedPreferences) {
 
     fun select(id: String) { if (rawLocations.any { it.id == id }) { selected = id; save() } }
     fun addLocation(name: String) { if (name.isNotBlank()) { val h = Location(UUID.randomUUID().toString(), name.trim()); rawLocations = rawLocations + h; selected = h.id; save() } }
+    fun renameLocation(id: String, name: String) { if (name.isNotBlank()) { rawLocations = rawLocations.map { if (it.id == id) it.copy(name = name.trim()) else it }; save() } }
     /** Deleting a location keeps its devices in the app, no longer assigned to a location. */
     fun deleteLocation(id: String) {
         if (rawLocations.size <= 1) return

@@ -38,6 +38,8 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
     var isNew by remember { mutableStateOf(false) }
     var removeId by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled = page == Page.DEVICES && selectedDevice != null) { selectedDevice = null }
+    var settingsPage by remember { mutableStateOf<SettingsPage?>(null) }
+    BackHandler(enabled = page == Page.SETTINGS && settingsPage != null && editing == null) { settingsPage = null }
 
     // Sessions run only while the activity is visible.
     var active by remember { mutableStateOf(activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
@@ -86,14 +88,14 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                         if (isNew) page = Page.DASHBOARD
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
-                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { page = Page.SETTINGS }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
+                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { settingsPage = SettingsPage.DASHBOARDS; page = Page.SETTINGS }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = store.devices.firstOrNull { it.id == selectedDevice }
                             if (device == null) DeviceListScreen(store, manager, onOpen = { selectedDevice = it })
                             else DeviceDetailScreen(store, manager, device, onBack = { selectedDevice = null }, onEdit = { edit(device, false) })
                         }
-                        Page.SETTINGS -> SettingsScreen(store, dashboards, manager)
+                        Page.SETTINGS -> SettingsScreen(store, dashboards, manager, settingsPage, onOpen = { settingsPage = it })
                     }
                 }
                 // A slimmer bar than Material's 80 dp NavigationBar: 64 dp with labels, 40 dp with icons only (the 32 dp indicator plus the same small gap).
@@ -101,7 +103,7 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(if (store.navLabels) 64.dp else 40.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
                         listOf(Triple(Page.DASHBOARD, "Dashboard", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
                             NavigationBarItem(
-                                selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; page = target },
+                                selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; if (target == Page.SETTINGS) settingsPage = null; page = target },
                                 icon = { Icon(icon, contentDescription = if (store.navLabels) null else label) },
                                 label = if (store.navLabels) { { Text(label, style = MaterialTheme.typography.labelSmall) } } else null,
                             )
