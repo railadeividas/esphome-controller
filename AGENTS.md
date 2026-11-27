@@ -31,7 +31,7 @@ Build a local-first Android app that discovers and controls arbitrary ESPHome Na
 
 ## Current state and next work
 
-Updated 2026-11-27. `main` is pushed; branch `feat/consistent-header` holds the shared page header.
+Updated 2026-11-27. `main` is pushed and in sync with `origin/main` (shared page header merged).
 
 **Model and storage**
 - Devices are app-level (`LocationStore`, preference file `locations`, keys `locations`, `devices`, `selected`), each with an optional `locationId`. Setup/edit has a Location picker ("No location" allowed). Deleting a location unassigns its devices; removing a device deletes it, its keys and its saved controls. User-facing wording is "location"; the first tab is "Dashboard".
