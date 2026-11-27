@@ -62,7 +62,11 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         // Top bar: dashboard switcher, edit and settings.
         ScreenHeader(
             title = board.name,
-            subtitle = if (settings.summaryLine && !editing) summaryText(board, store, manager) else null,
+            // "Description · Summary", each part only when enabled; the summary is hidden while editing.
+            subtitle = listOfNotNull(
+                board.description.takeIf { settings.showDescription && it.isNotBlank() },
+                if (settings.summaryLine && !editing) summaryText(board, store, manager).takeIf { it.isNotBlank() } else null,
+            ).joinToString(" · ").ifEmpty { null },
             onTitleClick = { menuOpen = true },
             titleMenu = {
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

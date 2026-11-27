@@ -96,11 +96,13 @@ data class DashboardSettings(
     val snackbarErrors: Boolean = true,
     /** A summary line (lights on, open doors, offline devices) under the dashboard name. */
     val summaryLine: Boolean = false,
+    /** The dashboard's description under its name, before the summary. */
+    val showDescription: Boolean = true,
     /** Pull down to reconnect all devices on this dashboard immediately. */
     val pullToRefresh: Boolean = true,
 )
 
-data class Dashboard(val id: String, val name: String, val sections: List<Section> = emptyList(), val settings: DashboardSettings = DashboardSettings()) {
+data class Dashboard(val id: String, val name: String, val sections: List<Section> = emptyList(), val settings: DashboardSettings = DashboardSettings(), val description: String = "") {
     /** Devices referenced by any section. */
     val deviceIds: Set<String> get() = sections.flatMap { s -> s.items.map { it.deviceId } + listOfNotNull(s.pendingDeviceId) }.toSet()
 }
@@ -141,6 +143,7 @@ class DashboardStore(private val prefs: SharedPreferences) {
         return d
     }
     fun rename(id: String, name: String) = update(id) { it.copy(name = name.trim().ifBlank { it.name }) }
+    fun setDescription(id: String, description: String) = update(id) { it.copy(description = description.trim()) }
     fun delete(id: String) {
         if (dashboards.size <= 1) return
         dashboards = dashboards.filterNot { it.id == id }
@@ -261,7 +264,7 @@ object DashboardCodec {
         "security" to "shield-home", "favourite" to "heart", "pets" to "paw", "clock" to "clock-outline",
     )
 
-    fun encode(d: Dashboard): JSONObject = JSONObject().put("id", d.id).put("name", d.name)
+    fun encode(d: Dashboard): JSONObject = JSONObject().put("id", d.id).put("name", d.name).put("description", d.description)
         .put("sections", JSONArray().apply { d.sections.forEach { put(encodeSection(it)) } })
         .put("settings", encodeSettings(d.settings))
 
@@ -269,7 +272,7 @@ object DashboardCodec {
         // Saves from before section options kept them in the dashboard settings; those become each section's starting values.
         val legacy = o.optJSONObject("settings")
         val sections = o.optJSONArray("sections")?.let { a -> (0 until a.length()).mapNotNull { i -> runCatching { decodeSection(a.getJSONObject(i), legacy) }.getOrNull() } }.orEmpty()
-        return Dashboard(o.getString("id"), o.optString("name", "Dashboard"), sections, decodeSettings(o.optJSONObject("settings")))
+        return Dashboard(o.getString("id"), o.optString("name", "Dashboard"), sections, decodeSettings(o.optJSONObject("settings")), o.optString("description"))
     }
 
     private fun encodeSection(s: Section) = JSONObject().put("id", s.id).put("type", s.type.name).put("title", s.title).put("text", s.text)
@@ -308,7 +311,7 @@ object DashboardCodec {
 
     private fun encodeSettings(s: DashboardSettings) = JSONObject()
         .put("brightnessPercent", s.brightnessPercent).put("dimOffline", s.dimOffline)
-        .put("pendingSpinner", s.pendingSpinner).put("snackbarErrors", s.snackbarErrors).put("summaryLine", s.summaryLine).put("pullToRefresh", s.pullToRefresh)
+        .put("pendingSpinner", s.pendingSpinner).put("snackbarErrors", s.snackbarErrors).put("summaryLine", s.summaryLine).put("showDescription", s.showDescription).put("pullToRefresh", s.pullToRefresh)
 
     private fun decodeSettings(o: JSONObject?): DashboardSettings {
         val d = DashboardSettings()
@@ -317,7 +320,7 @@ object DashboardCodec {
             brightnessPercent = o.optBoolean("brightnessPercent", d.brightnessPercent),
             dimOffline = o.optBoolean("dimOffline", d.dimOffline),
             pendingSpinner = o.optBoolean("pendingSpinner", d.pendingSpinner), snackbarErrors = o.optBoolean("snackbarErrors", d.snackbarErrors),
-            summaryLine = o.optBoolean("summaryLine", d.summaryLine), pullToRefresh = o.optBoolean("pullToRefresh", d.pullToRefresh),
+            summaryLine = o.optBoolean("summaryLine", d.summaryLine), showDescription = o.optBoolean("showDescription", d.showDescription), pullToRefresh = o.optBoolean("pullToRefresh", d.pullToRefresh),
         )
     }
 }
