@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Devices
@@ -96,13 +97,20 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                         Page.SETTINGS -> SettingsScreen(store, dashboards, manager)
                     }
                 }
-                if (editing == null) NavigationBar(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surface) {
-                    listOf(Triple(Page.DASHBOARD, "Dashboard", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
-                        NavigationBarItem(selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; page = target }, icon = { Icon(icon, contentDescription = null) }, label = { Text(label) })
+                // A slimmer bar than Material's 80 dp NavigationBar: 64 dp with labels, 40 dp with icons only (the 32 dp indicator plus the same small gap).
+                if (editing == null) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+                    Row(Modifier.fillMaxWidth().navigationBarsPadding().height(if (store.navLabels) 64.dp else 40.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
+                        listOf(Triple(Page.DASHBOARD, "Dashboard", Icons.Default.Home), Triple(Page.DEVICES, "Devices", Icons.Default.Devices), Triple(Page.DISCOVER, "Discover", Icons.AutoMirrored.Filled.List), Triple(Page.SETTINGS, "Settings", Icons.Default.Settings)).forEach { (target, label, icon) ->
+                            NavigationBarItem(
+                                selected = page == target, onClick = { if (target == Page.DEVICES) selectedDevice = null; page = target },
+                                icon = { Icon(icon, contentDescription = if (store.navLabels) null else label) },
+                                label = if (store.navLabels) { { Text(label, style = MaterialTheme.typography.labelSmall) } } else null,
+                            )
+                        }
                     }
                 }
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp))
           }
         }
         details?.let { id -> store.devices.find { it.id == id }?.let { d ->

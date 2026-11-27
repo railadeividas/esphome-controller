@@ -310,6 +310,13 @@ fun SettingsScreen(store: LocationStore, dashboards: DashboardStore, manager: Co
             listOf("system" to "System default", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = store.theme == value, onClick = { store.changeTheme(value) }); Text(label) }
             }
+            Row(Modifier.fillMaxWidth().clickable { store.changeNavLabels(!store.navLabels) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Navigation labels")
+                    Text("Show text under the bottom navigation icons", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = store.navLabels, onCheckedChange = { store.changeNavLabels(it) })
+            }
         }
     }
 }

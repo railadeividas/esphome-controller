@@ -36,6 +36,9 @@ class LocationStore(private val prefs: SharedPreferences) {
 
     val location: Location get() = locations.first { it.id == selected }
 
+    /** Text labels under the bottom navigation icons (icons only by default). */
+    var navLabels by mutableStateOf(prefs.getBoolean("navLabels", false)); private set
+    fun changeNavLabels(value: Boolean) { navLabels = value; prefs.edit().putBoolean("navLabels", value).apply() }
     fun changeTheme(value: String) { if (value in THEMES) { theme = value; prefs.edit().putString("theme", value).apply() } }
 
     private fun parseDevice(o: JSONObject) = Device(
