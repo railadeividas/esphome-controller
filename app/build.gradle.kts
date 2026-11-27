@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-// Version: CI passes -PappVersionName/-PappVersionCode (see .github/workflows/release.yml).
+// Version: CI passes -PappVersionName/-PappVersionCode/-PappBuildTime (see .github/workflows/release.yml).
 // Local builds fall back to git (commit count and `git describe`), then to fixed defaults.
 fun git(vararg args: String): String? = runCatching {
     providers.exec { commandLine("git", *args); isIgnoreExitValue = true }.standardOutput.asText.get().trim().ifEmpty { null }
@@ -15,6 +15,8 @@ val appVersionCode = (findProperty("appVersionCode") as String?)?.toInt()
 val appVersionName = (findProperty("appVersionName") as String?)
     ?: git("describe", "--tags", "--match", "v[0-9]*", "--dirty")?.removePrefix("v")
     ?: "0.0.0-dev+$gitCommit"
+// Build time (epoch milliseconds): CI passes -PappBuildTime; local builds use the current time.
+val appBuildTime = (findProperty("appBuildTime") as String?)?.toLongOrNull() ?: System.currentTimeMillis()
 
 // Release signing comes from the environment (CI secrets); without it, release builds use the debug key.
 val releaseKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let(::file)?.takeIf { it.exists() }
@@ -27,6 +29,7 @@ android {
         applicationId = "com.example.esphomecontroller"; minSdk = 26; targetSdk = 35
         versionCode = appVersionCode; versionName = appVersionName
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+        buildConfigField("long", "BUILD_TIME", "${appBuildTime}L")
     }
     signingConfigs {
         if (releaseKeystore != null) create("release") {
