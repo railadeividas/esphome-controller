@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -182,6 +181,8 @@ private fun AboutSettings(onBack: () -> Unit) {
             SettingsGroup {
                 SettingsRow(Icons.Default.Info, AboutColor, "Version", appVersion())
                 SettingsDivider()
+                SettingsRow(Icons.Default.Build, AboutColor, "Build", "${BuildConfig.VERSION_CODE} · ${BuildConfig.GIT_COMMIT}")
+                SettingsDivider()
                 SettingsRow(Icons.Default.Lock, AboutColor, "Encrypted connections", if (Build.VERSION.SDK_INT >= 33) "Supported on this device" else "Need Android 13 or newer")
             }
         }
@@ -250,8 +251,5 @@ private fun ConfirmDialog(title: String, text: String, confirm: String, onDismis
 private fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
 private fun themeLabel(theme: String) = when (theme) { "light" -> "Light"; "dark" -> "Dark"; else -> "System" }
 
-@Composable
-private fun appVersion(): String {
-    val context = LocalContext.current
-    return remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "unknown" }
-}
+/** Version injected at build time (release tag in CI, `git describe` locally). */
+private fun appVersion(): String = BuildConfig.VERSION_NAME

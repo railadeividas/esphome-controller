@@ -4,12 +4,45 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+// Version: CI passes -PappVersionName/-PappVersionCode (see .github/workflows/release.yml).
+// Local builds fall back to git (commit count and `git describe`), then to fixed defaults.
+fun git(vararg args: String): String? = runCatching {
+    providers.exec { commandLine("git", *args); isIgnoreExitValue = true }.standardOutput.asText.get().trim().ifEmpty { null }
+}.getOrNull()
+val gitCommit = git("rev-parse", "--short=12", "HEAD") ?: "unknown"
+val appVersionCode = (findProperty("appVersionCode") as String?)?.toInt()
+    ?: git("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 1
+val appVersionName = (findProperty("appVersionName") as String?)
+    ?: git("describe", "--tags", "--match", "v[0-9]*", "--dirty")?.removePrefix("v")
+    ?: "0.0.0-dev+$gitCommit"
+
+// Release signing comes from the environment (CI secrets); without it, release builds use the debug key.
+val releaseKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let(::file)?.takeIf { it.exists() }
+
 android {
     namespace = "com.example.esphomecontroller"
     compileSdk = 35
     buildToolsVersion = "35.0.0"
-    defaultConfig { applicationId = "com.example.esphomecontroller"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "0.1" }
-    buildFeatures { compose = true }
+    defaultConfig {
+        applicationId = "com.example.esphomecontroller"; minSdk = 26; targetSdk = 35
+        versionCode = appVersionCode; versionName = appVersionName
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+    }
+    signingConfigs {
+        if (releaseKeystore != null) create("release") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
+    }
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
