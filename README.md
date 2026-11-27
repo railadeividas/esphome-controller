@@ -24,6 +24,8 @@ References: [Android NSD](https://developer.android.com/reference/android/net/ns
 
 The encrypted client uses Noise NNpsk0 with a key entered per device and encrypted using Android Keystore. The current client requires Android 13 or later for encrypted connections, and implements an initial subset of entity platforms. An encrypted device has connected on a physical phone; broader interoperability and command verification are still needed. Unencrypted connections require explicit selection and a warning; encrypted connections never automatically fall back to plaintext. The Noise library torann 0.3.2 is MIT licensed, recently published, and its authors state it has not been independently audited.
 
+Icons: entity icons advertised by devices (`mdi:…`) and section title icons use [Material Design Icons](https://pictogrammers.com/library/mdi/) 7.4.47 by Pictogrammers, bundled as `app/src/main/res/font/mdi.ttf` with a name index in `app/src/main/assets/mdi/` (Apache 2.0; licence in `app/src/main/assets/mdi/LICENSE`). Rebuild both with `tools/mdi/build_index.py` from the `@mdi/font` and `@mdi/svg` npm packages.
+
 ## Connecting through the web server
 
 In device setup or Info → Edit device, choose **Web server · No login** or **Web server · Username and password**. The default web port is 80 and may be changed. Credentials are stored with Android Keystore-backed encryption. ESPHome web connections use HTTP in this build: states and commands are unencrypted, and Basic authentication also sends credentials without transport encryption. Use a trusted local network. Web and Native API settings are separate; the app never automatically falls back between them.

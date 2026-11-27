@@ -64,33 +64,8 @@ fun relativeTime(then: Long, now: Long): String {
 /** A device whose connection dropped and is being retried; setup problems are shown separately. */
 val ControlSession?.isOffline: Boolean get() = (this?.connection as? ConnectionState.Failed)?.needsSetup == false
 
-private fun connectionDetail(session: ControlSession?, setupError: String?, lastSeen: Long? = null): String = setupError ?: when (val c = session?.connection) {
-    null -> "Not connected"
-    ConnectionState.Connecting -> "Connecting…"
-    is ConnectionState.Connected -> when (c.security) { Security.ENCRYPTED -> "Connected securely"; Security.UNENCRYPTED -> "Connected without encryption"; Security.WEB -> "Connected via web server" }
-    is ConnectionState.Failed -> "Offline" + (lastSeen?.let { " · last seen ${relativeTime(it, System.currentTimeMillis())}" } ?: "") + " · ${c.reason}"
-}
-
 private fun securityLabel(device: LocationStore.Device): String = when (device.mode) {
     "plain" -> "Unencrypted"; "encrypted" -> "Encrypted"; "web" -> "HTTP, no login"; "web_auth" -> "HTTP with login"; else -> "Not configured"
-}
-
-@Composable
-fun StatusDot(connected: Boolean) =
-    Box(Modifier.size(10.dp).background(if (connected) Color(0xFF36A76B) else Color(0xFFAAA7B2), CircleShape))
-
-/** Connection and firmware information shared by the info dialog and the device page. */
-@Composable
-fun DeviceInfoLines(device: LocationStore.Device, session: ControlSession?, setupError: String?, details: DeviceDetails? = session?.details) {
-    Text("Address: ${device.address}")
-    Text("Connection: ${connectionDetail(session, setupError)}")
-    Text("Interface: ${if (device.isWeb) "Web server" else "Native API"}")
-    Text("Security: ${securityLabel(device)}")
-    details?.let { d ->
-        listOf("Area" to d.area, "Model" to d.model, "Manufacturer" to d.manufacturer, "ESPHome" to d.esphomeVersion, "Project" to d.project)
-            .filter { it.second.isNotBlank() }.forEach { (label, value) -> Text("$label: $value") }
-    }
-    session?.lastError?.let { Text(it.message, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable

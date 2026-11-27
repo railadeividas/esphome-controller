@@ -21,17 +21,23 @@ class DashboardStoreTest {
     private val areas = mapOf("stairs" to "Hallway", "lamp" to "Office")
     private fun build(t: DashboardTemplate) = DashboardStore.buildSections(t, devices, { entities[it].orEmpty() }, { areas[it] })
 
-    @Test fun deviceTemplatesFollowLocations() {
-        assertEquals(listOf("stairs", "lamp", "hub"), build(DashboardTemplate.Devices(null)).map { it.deviceId })
-        assertEquals(listOf("lamp"), build(DashboardTemplate.Devices("office")).map { it.deviceId })
-        assertTrue(build(DashboardTemplate.Devices("office")).all { it.type == SectionType.DEVICE })
+    @Test fun deviceTemplatesBuildTileSectionsOfMainEntities() {
+        val all = build(DashboardTemplate.Devices(null))
+        assertEquals(listOf("Stairs", "Lamp", "Hub"), all.map { it.title })
+        assertTrue(all.all { it.type == SectionType.TILES && it.pendingDeviceId == null && !it.showDeviceNames })
+        // Configuration entities (the stairs Restart button) are left out.
+        assertEquals(listOf(ItemRef("stairs", "light:0:1")), all[0].items)
+        assertEquals(listOf("Lamp"), build(DashboardTemplate.Devices("office")).map { it.title })
         assertTrue(build(DashboardTemplate.Empty).isEmpty())
+        // A device whose entities are not known yet gets a section that waits for them.
+        val unknown = DashboardStore.buildSections(DashboardTemplate.Devices(null), devices.take(1), { emptyList() }, { null }).single()
+        assertEquals("stairs", unknown.pendingDeviceId); assertTrue(unknown.items.isEmpty())
     }
 
     @Test fun areaTemplateAddsHeadingsWithNoAreaLast() {
         val sections = build(DashboardTemplate.ByArea)
         assertEquals(listOf("Hallway", "Stairs", "Office", "Lamp", "No area", "Hub"), sections.map { it.title })
-        assertEquals(listOf(SectionType.HEADING, SectionType.DEVICE, SectionType.HEADING, SectionType.DEVICE, SectionType.HEADING, SectionType.DEVICE), sections.map { it.type })
+        assertEquals(listOf(SectionType.HEADING, SectionType.TILES, SectionType.HEADING, SectionType.TILES, SectionType.HEADING, SectionType.TILES), sections.map { it.type })
     }
 
     @Test fun typeTemplateGroupsEntitiesAcrossDevicesAndSkipsConfig() {
@@ -44,11 +50,12 @@ class DashboardStoreTest {
 
     @Test fun dashboardsRoundTripThroughJson() {
         val d = Dashboard("id1", "Evening", listOf(
-            Section("s1", SectionType.TILES, "Lights", listOf(ItemRef("stairs", "light:0:1")), columns = 3, readingsAsList = false, tapAction = TapAction.TOGGLE, allOnOff = false),
-            Section("s2", SectionType.DEVICE, "", deviceId = "hub", collapsed = true, showConfig = false, showDiagnostic = true, collapsible = false),
+            Section("s1", SectionType.TILES, "Lights", listOf(ItemRef("stairs", "light:0:1")), columns = 3, readingsAsList = false, tapAction = TapAction.TOGGLE, allOnOffWhenCollapsed = false),
+            Section("s2", SectionType.TILES, "", pendingDeviceId = "hub", collapsed = true, collapsible = false),
             Section("s3", SectionType.HEADING, "Upstairs", text = "Bedrooms", titleSize = TitleSize.H1),
             Section("s4", SectionType.LIST, "Readings", listOf(ItemRef("hub", "sensor:0:4"))),
-            Section("s5", SectionType.LIST, "Plain", showDeviceNames = false, tapAction = TapAction.NONE),
+            Section("s5", SectionType.LIST, "Plain", showDeviceNames = false, tapAction = TapAction.NONE, titleColor = TitleColor.AMBER, icon = "sofa"),
+            Section("s7", SectionType.TILES, "Tuned", titleColor = TitleColor.CUSTOM, customColor = 0xFF7FA8F0.toInt()),
             Section("s6", SectionType.COMPACT, "Small", listOf(ItemRef("stairs", "switch:0:2")), text = "Hall", columns = 4, titleSize = TitleSize.H2),
         ), DashboardSettings(summaryLine = true, pullToRefresh = false, brightnessPercent = false))
         assertEquals(d, DashboardCodec.decode(JSONObject(DashboardCodec.encode(d).toString())))
@@ -60,22 +67,29 @@ class DashboardStoreTest {
 
     @Test fun oldDashboardSettingsBecomeSectionOptions() {
         val old = JSONObject("""{"id":"x","name":"Old","settings":{"columns":3,"readingsAsList":false,"collapsibleSections":false,"showDeviceNames":false,
-            "showConfigDiagnostic":false,"tapToToggle":true,"summaryLine":true},"sections":[{"id":"a","type":"TILES"},{"id":"b","type":"DEVICE","deviceId":"hub"}]}""")
+            "showConfigDiagnostic":false,"tapToToggle":true,"summaryLine":true},"sections":[{"id":"a","type":"TILES"},{"id":"b","type":"TILES"}]}""")
         val d = DashboardCodec.decode(old)
         assertTrue(d.settings.summaryLine)
         d.sections.forEach { s ->
             assertEquals(3, s.columns); assertFalse(s.readingsAsList); assertFalse(s.collapsible); assertFalse(s.showDeviceNames)
-            assertFalse(s.showConfig); assertFalse(s.showDiagnostic); assertEquals(TapAction.TOGGLE, s.tapAction)
+            assertEquals(TapAction.TOGGLE, s.tapAction)
         }
         val noSheet = DashboardCodec.decode(JSONObject("""{"id":"y","name":"N","settings":{"controlsSheet":false},"sections":[{"id":"a","type":"LIST"}]}"""))
         assertEquals(TapAction.NONE, noSheet.sections.single().tapAction)
+    }
+
+    @Test fun oldDeviceSectionsBecomeTileSectionsWaitingForTheirDevice() {
+        val old = JSONObject("""{"id":"x","name":"Old","sections":[{"id":"b","type":"DEVICE","title":"Hall","deviceId":"hub","collapsed":true}]}""")
+        val s = DashboardCodec.decode(old).sections.single()
+        assertEquals(SectionType.TILES, s.type); assertEquals("hub", s.pendingDeviceId); assertEquals("Hall", s.title)
+        assertTrue(s.collapsed); assertFalse(s.showDeviceNames)
     }
 
     @Test fun moveKeepsBoundsAndDeviceIdsCollectEverySection() {
         assertEquals(listOf(2, 1, 3), DashboardStore.moved(listOf(1, 2, 3), 1, -1))
         assertEquals(listOf(1, 2, 3), DashboardStore.moved(listOf(1, 2, 3), 0, -1))
         assertEquals(listOf(1, 2, 3), DashboardStore.moved(listOf(1, 2, 3), 5, 1))
-        val d = Dashboard("d", "D", listOf(Section(type = SectionType.TILES, items = listOf(ItemRef("a", "x"))), Section(type = SectionType.DEVICE, deviceId = "b")))
+        val d = Dashboard("d", "D", listOf(Section(type = SectionType.TILES, items = listOf(ItemRef("a", "x"))), Section(type = SectionType.TILES, pendingDeviceId = "b")))
         assertEquals(setOf("a", "b"), d.deviceIds)
     }
 }

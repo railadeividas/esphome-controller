@@ -13,6 +13,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.example.esphomecontroller.api.*
@@ -30,7 +34,7 @@ private data class Resolved(val ref: ItemRef, val device: LocationStore.Device?,
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, onManageDashboards: () -> Unit, onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit) {
+fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, onManageDashboards: () -> Unit) {
     val board = dashboards.selected
     val settings = board.settings
     var menuOpen by remember { mutableStateOf(false) }
@@ -41,8 +45,9 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     var editingSection by remember(board.id) { mutableStateOf<Section?>(null) }
     var picking by remember(board.id) { mutableStateOf<Section?>(null) }
     var sheet by remember(board.id) { mutableStateOf<ItemRef?>(null) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(30_000); now = System.currentTimeMillis() } }
+    // Sections waiting for a device's entities (device templates, old Device sections) fill as soon as they are known.
+    val knownEntities = store.devices.map { it.id to manager.entities(it.id).size }
+    LaunchedEffect(knownEntities) { dashboards.fillPending({ id -> store.devices.any { it.id == id } }, { manager.entities(it) }) }
     val autoColumns = if (LocalConfiguration.current.screenWidthDp >= 600) 4 else 2
 
     fun resolve(ref: ItemRef): Resolved {
@@ -53,7 +58,7 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     }
     val open: (ItemRef) -> Unit = { sheet = it }
 
-    CompositionLocalProvider(LocalEntityStyle provides EntityStyle(settings.brightnessPercent, tapToToggle = false, pendingSpinner = settings.pendingSpinner)) {
+    CompositionLocalProvider(LocalEntityStyle provides EntityStyle(settings.brightnessPercent, tapToToggle = false, pendingSpinner = settings.pendingSpinner, readOnly = editing)) {
         // Top bar: dashboard switcher, edit and settings.
         ScreenHeader(
             title = board.name,
@@ -88,7 +93,7 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
                 }
                 items(board.sections, key = { it.id }) { section ->
                     SectionView(
-                        section, board, store, dashboards, manager, settings, section.columns.takeIf { it > 0 } ?: autoColumns, editing, now, ::resolve, open, onInfo, onSetup,
+                        section, board, store, dashboards, manager, settings, section.columns.takeIf { it > 0 } ?: autoColumns, editing, ::resolve, open,
                         onEdit = { editingSection = section }, onPick = { picking = section },
                     )
                 }
@@ -130,6 +135,8 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
     }
 }
 
+fun TitleSize.iconSize() = when (this) { TitleSize.H1 -> 32.dp; TitleSize.H2 -> 28.dp; TitleSize.H3 -> 24.dp; TitleSize.H4 -> 20.dp }
+
 @Composable
 fun TitleSize.textStyle() = when (this) {
     TitleSize.H1 -> MaterialTheme.typography.headlineMedium
@@ -152,19 +159,13 @@ private fun summaryText(board: Dashboard, store: LocationStore, manager: Connect
 @Composable
 private fun SectionView(
     section: Section, board: Dashboard, store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager, settings: DashboardSettings,
-    columns: Int, editing: Boolean, now: Long, resolve: (ItemRef) -> Resolved, open: (ItemRef) -> Unit,
-    onInfo: (LocationStore.Device) -> Unit, onSetup: (LocationStore.Device) -> Unit, onEdit: () -> Unit, onPick: () -> Unit,
+    columns: Int, editing: Boolean, resolve: (ItemRef) -> Resolved, open: (ItemRef) -> Unit, onEdit: () -> Unit, onPick: () -> Unit,
 ) {
-    val device = section.deviceId?.let { id -> store.devices.firstOrNull { it.id == id } }
+    val pendingDevice = section.pendingDeviceId?.let { id -> store.devices.firstOrNull { it.id == id } }
     val collapsed = section.collapsible && section.collapsed && !editing
     val onOpen: ((ItemRef) -> Unit)? = if (editing || section.tapAction == TapAction.NONE) null else open
     val items: List<Resolved> = when (section.type) {
         SectionType.TILES, SectionType.LIST, SectionType.COMPACT -> section.items.map(resolve)
-        SectionType.DEVICE -> device?.let { d ->
-            manager.entities(d.id).filter {
-                it.category == EntityCategory.NONE || (it.category == EntityCategory.CONFIG && section.showConfig) || (it.category == EntityCategory.DIAGNOSTIC && section.showDiagnostic)
-            }.map { resolve(ItemRef(d.id, it.stableId)) }
-        }.orEmpty()
         SectionType.HEADING -> emptyList()
     }
     // Lights, switches and fans that can be commanded right now, for the all on / all off button.
@@ -179,16 +180,17 @@ private fun SectionView(
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (section.type == SectionType.DEVICE && device != null) { StatusDot(manager.sessions[device.id].isConnected); Spacer(Modifier.width(10.dp)) }
             Column(Modifier.weight(1f)) {
-                val title = section.title.ifBlank { if (section.type == SectionType.DEVICE) device?.name ?: "Device" else "" }
-                if (title.isNotBlank()) Text(title, style = section.titleSizeOrDefault.textStyle())
+                val title = section.title
+                val icon = sectionIcon(section.icon)
+                if (title.isNotBlank() || icon != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    val color = section.titleColorValue()
+                    icon?.let { MdiGlyph(it, section.titleSizeOrDefault.iconSize(), Modifier.padding(end = 8.dp), tint = color) }
+                    if (title.isNotBlank()) Text(title, style = section.titleSizeOrDefault.textStyle(), color = color)
+                }
                 if (section.text.isNotBlank()) Text(section.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 when (section.type) {
                     SectionType.HEADING -> Unit
-                    SectionType.DEVICE -> Text(
-                        if (device == null) "Device removed" else connectionSummary(manager.sessions[device.id], manager.setupErrors[device.id], manager.lastSeen(device.id), now),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> if (editing) Text("${section.type.label} · ${section.items.size} entities", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -198,13 +200,12 @@ private fun SectionView(
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit section") }
                 IconButton(onClick = { dashboards.deleteSection(board.id, section.id) }) { Icon(Icons.Default.Delete, "Delete section") }
             } else {
-                if (section.allOnOff && toggles.isNotEmpty() && !collapsed) {
+                if (section.allOnOff && toggles.isNotEmpty() && (!collapsed || section.allOnOffWhenCollapsed)) {
                     val anyOn = toggles.any { isOn(it.live!!.state) == true }
                     IconButton(onClick = { toggles.forEach { r -> r.session?.send(r.live!!, Command.SetOn(!anyOn)) } }) {
                         Icon(Icons.Default.PowerSettingsNew, if (anyOn) "Turn all off" else "Turn all on", tint = if (anyOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                if (section.type == SectionType.DEVICE && device != null) IconButton(onClick = { onInfo(device) }) { Icon(Icons.Default.Info, "Device information") }
                 if (section.collapsible && section.hasEntities) IconButton(onClick = { dashboards.toggleCollapsed(board.id, section.id) }) {
                     Icon(Icons.Default.ExpandMore, if (collapsed) "Expand" else "Collapse", Modifier.rotate(if (collapsed) -90f else 0f))
                 }
@@ -214,22 +215,20 @@ private fun SectionView(
             when (section.type) {
                 SectionType.HEADING -> Unit
                 SectionType.TILES, SectionType.LIST, SectionType.COMPACT -> {
-                    if (items.isEmpty()) Text(if (editing) "No entities yet." else "—", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (items.isEmpty()) Text(when {
+                        pendingDevice != null -> "Waiting for ${pendingDevice.name} to report its entities…"
+                        editing -> "No entities yet."
+                        else -> "—"
+                    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (section.type != SectionType.LIST) TilesAndReadings(items, settings, columns, section.readingsAsList, editing, section.showDeviceNames, onOpen, tools, compact = section.type == SectionType.COMPACT)
                     else ListCard(items, settings, editing, section.showDeviceNames, onOpen, tools)
                     if (editing) TextButton(onClick = onPick) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add or remove entities") }
-                }
-                SectionType.DEVICE -> if (device == null) Text("This device is no longer in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                else {
-                    if (items.isEmpty()) Text(if (manager.sessions[device.id].isConnected) "Waiting for device states…" else "—", style = MaterialTheme.typography.bodySmall)
-                    TilesAndReadings(items, settings, columns, section.readingsAsList, editing = false, showDevice = false, open = onOpen, itemTools = null)
-                    if (manager.setupErrors[device.id] != null) TextButton(onClick = { onSetup(device) }) { Text("Fix connection settings") }
                 }
             }
         }
         // Without snackbars, command failures are shown under the section they happened in.
         if (!settings.snackbarErrors) {
-            val ids = if (section.type == SectionType.DEVICE) listOfNotNull(section.deviceId) else section.items.map { it.deviceId }.distinct()
+            val ids = section.items.map { it.deviceId }.distinct()
             ids.mapNotNull { manager.sessions[it]?.lastError?.message }.distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
     }

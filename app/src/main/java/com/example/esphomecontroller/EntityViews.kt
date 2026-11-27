@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
@@ -89,6 +90,16 @@ fun entityIcon(entity: Entity): ImageVector {
     return byClass ?: entity.platform.icon()
 }
 
+/**
+ * An entity's icon: the exact MDI glyph when the device advertises a known "mdi:" icon, otherwise the closest
+ * Material icon from [entityIcon]. [modifier] may add padding; the icon itself is [size].
+ */
+@Composable
+fun EntityIcon(entity: Entity, modifier: Modifier = Modifier, size: Dp = 24.dp, tint: Color = MaterialTheme.colorScheme.primary) {
+    val mdi = Mdi.find(entity.icon)
+    if (mdi != null) MdiGlyph(mdi, size, modifier, tint) else Icon(entityIcon(entity), contentDescription = null, modifier = modifier.size(size), tint = tint)
+}
+
 /** The card look used across the app: theme surface (not Material's default grey), 16 dp corners, 1 dp elevation. */
 val AppCardShape = RoundedCornerShape(16.dp)
 @Composable fun appCardColors() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -99,7 +110,8 @@ private val Platform.isToggle get() = this is Platform.Light || this == Platform
 private val Platform.showsValue get() = isReadOnly || this is Platform.Cover || this is Platform.Valve || this is Platform.Lock || this is Platform.Climate
 
 /** Presentation options set per dashboard; screens without a dashboard use the defaults. */
-data class EntityStyle(val brightnessPercent: Boolean = true, val tapToToggle: Boolean = false, val pendingSpinner: Boolean = false)
+/** [readOnly] disables every control (dashboard edit mode), so nothing can be sent to a device by accident. */
+data class EntityStyle(val brightnessPercent: Boolean = true, val tapToToggle: Boolean = false, val pendingSpinner: Boolean = false, val readOnly: Boolean = false)
 val LocalEntityStyle = staticCompositionLocalOf { EntityStyle() }
 
 /** Wraps a send so that only the live (current-connection) entity is ever commanded. */
@@ -118,7 +130,7 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
     var pending by remember(entity.stableId) { mutableStateOf(false) }
     LaunchedEffect(live?.state) { pending = false }
     LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
-    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
     val tapToggle = style.tapToToggle && p.isToggle && overlay == null
     val gestures = if (onOpen == null && !tapToggle) Modifier else Modifier.pointerInput(onOpen, tapToggle, send.ready, isOn(live?.state)) {
@@ -131,7 +143,7 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
       Box {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                EntityIcon(entity, size = 30.dp)
                 if (p.isToggle) {
                     Spacer(Modifier.weight(1f))
                     PowerButton(entity, live, send)
@@ -173,7 +185,7 @@ fun CompactTile(entity: Entity, session: ControlSession?, live: Entity?, modifie
     var pending by remember(entity.stableId) { mutableStateOf(false) }
     LaunchedEffect(live?.state) { pending = false }
     LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
-    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
     val tapToggle = style.tapToToggle && p.isToggle && overlay == null
     val on = isOn(entity.state) == true
@@ -187,8 +199,7 @@ fun CompactTile(entity: Entity, session: ControlSession?, live: Entity?, modifie
     Card(modifier.heightIn(min = 64.dp).then(gestures), shape = AppCardShape, colors = colors, elevation = appCardElevation()) {
         Box(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(24.dp),
-                    tint = if (p.isToggle && !on) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                EntityIcon(entity, size = 24.dp, tint = if (p.isToggle && !on) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(entity.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -221,7 +232,7 @@ private fun compactState(entity: Entity, brightnessPercent: Boolean): String {
 @Composable
 fun ReadOnlyRow(entity: Entity, deviceLabel: String? = null, onOpen: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        EntityIcon(entity, size = 22.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(entity.name, style = MaterialTheme.typography.bodyMedium)
@@ -242,7 +253,7 @@ fun CompactControlRow(entity: Entity, session: ControlSession?, live: Entity?, d
     var pending by remember(entity.stableId) { mutableStateOf(false) }
     LaunchedEffect(live?.state) { pending = false }
     LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(5000); pending = false } }
-    val send = Sender(session, live, isCommandReady(session.isConnected, live)) { if (style.pendingSpinner) pending = true }
+    val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly) { if (style.pendingSpinner) pending = true }
     val p = entity.platform
     val tapToggle = style.tapToToggle && p.isToggle
     val click = when {
@@ -252,7 +263,7 @@ fun CompactControlRow(entity: Entity, session: ControlSession?, live: Entity?, d
     }
     val longPress = if (tapToggle && onOpen != null) Modifier.pointerInput(onOpen) { detectTapGestures(onLongPress = { onOpen() }) } else Modifier
     Row(Modifier.fillMaxWidth().then(longPress).then(click).heightIn(min = 44.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(entityIcon(entity), contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        EntityIcon(entity, size = 22.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(entity.name, style = MaterialTheme.typography.bodyMedium)
@@ -288,14 +299,14 @@ fun EntityDetailRow(entity: Entity, session: ControlSession?, live: Entity?) {
 fun EntityControls(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier = Modifier, leadingIcon: Boolean = false) {
     if (!leadingIcon) { EntityControlsColumn(entity, session, live, modifier); return }
     Row(Modifier.fillMaxWidth().then(modifier)) {
-        Icon(entityIcon(entity), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 9.dp, end = 14.dp).size(22.dp))
+        EntityIcon(entity, Modifier.padding(top = 9.dp, end = 14.dp), size = 22.dp)
         EntityControlsColumn(entity, session, live, Modifier.weight(1f))
     }
 }
 
 @Composable
 private fun EntityControlsColumn(entity: Entity, session: ControlSession?, live: Entity?, modifier: Modifier) {
-    val send = Sender(session, live, isCommandReady(session.isConnected, live))
+    val send = Sender(session, live, isCommandReady(session.isConnected, live) && !LocalEntityStyle.current.readOnly)
     val p = entity.platform
     run {
         Column(Modifier.fillMaxWidth().then(modifier), verticalArrangement = Arrangement.spacedBy(4.dp)) {

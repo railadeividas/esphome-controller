@@ -30,10 +30,10 @@ private enum class Page { DASHBOARD, DEVICES, DISCOVER, SETTINGS }
 fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls) {
     val activity = LocalContext.current as ComponentActivity
     val manager = remember(activity) { ViewModelProvider(activity)[ConnectionManager::class.java] }
+    LoadMdi()
     var page by remember { mutableStateOf(Page.DASHBOARD) }
     val location = store.location
     var selectedDevice by remember(location.id) { mutableStateOf<String?>(null) }
-    var details by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<LocationStore.Device?>(null) }
     var isNew by remember { mutableStateOf(false) }
     var removeId by remember { mutableStateOf<String?>(null) }
@@ -90,7 +90,7 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
                         if (isNew) page = Page.DASHBOARD
                     }, onRemove = if (isNew) null else { { editing = null; removeId = setup.id } })
                     else when (page) {
-                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { settingsPage = SettingsPage.DASHBOARDS; page = Page.SETTINGS }, onInfo = { details = it.id }, onSetup = { edit(it, false) })
+                        Page.DASHBOARD -> DashboardScreen(store, dashboards, manager, onManageDashboards = { settingsPage = SettingsPage.DASHBOARDS; page = Page.SETTINGS })
                         Page.DISCOVER -> DiscoverScreen(store, discovered, scan, onSetup = { edit(it, true) })
                         Page.DEVICES -> {
                             val device = store.devices.firstOrNull { it.id == selectedDevice }
@@ -116,14 +116,6 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp))
           }
         }
-        details?.let { id -> store.devices.find { it.id == id }?.let { d ->
-            AlertDialog(
-                onDismissRequest = { details = null }, title = { Text(d.name) },
-                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Device information", style = MaterialTheme.typography.titleSmall); DeviceInfoLines(d, manager.sessions[id], manager.setupErrors[id], manager.details(id)) } },
-                confirmButton = { TextButton(onClick = { details = null; edit(d, false) }) { Text("Edit device") } },
-                dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
-            )
-        } }
         removeId?.let { id ->
             AlertDialog(
                 onDismissRequest = { removeId = null }, title = { Text("Remove device?") }, text = { Text("The device and its saved keys will be removed from the app.") },

@@ -18,12 +18,20 @@ enum class SectionType(val label: String, val description: String) {
     TILES("Tiles", "Chosen entities as tiles"),
     LIST("List", "Chosen entities as compact rows"),
     COMPACT("Compact tiles", "Chosen entities as small tiles with icon, name and state"),
-    DEVICE("Device", "All entities of one device, kept up to date automatically"),
     HEADING("Heading", "A title or note between sections"),
 }
 
 /** Section title sizes, largest first. */
 enum class TitleSize(val label: String) { H1("H1"), H2("H2"), H3("H3"), H4("H4") }
+
+/**
+ * Colour of a section's title and icon. Presets have a shade per theme (see `TitleColor.color()` in `Dashboard.kt`);
+ * [CUSTOM] uses [Section.customColor] as-is in every theme.
+ */
+enum class TitleColor(val label: String) {
+    DEFAULT("Default"), ACCENT("Accent"), AMBER("Amber"), GREEN("Green"), BLUE("Blue"), RED("Red"), PINK("Pink"), CUSTOM("Custom");
+    companion object { val PRESETS = listOf(ACCENT, AMBER, GREEN, BLUE, RED, PINK) }
+}
 
 enum class TapAction(val label: String, val description: String) {
     CONTROLS("Open controls", "Long-press a tile, tap its name or tap a row for all controls"),
@@ -37,33 +45,40 @@ data class Section(
     val title: String = "",
     /** Entities shown by sections with [hasChosenItems], in order. */
     val items: List<ItemRef> = emptyList(),
-    /** The device followed by a [SectionType.DEVICE] section. */
-    val deviceId: String? = null,
+    /**
+     * A device whose main entities still have to be added to [items]: set by device templates and by old "Device"
+     * sections when the device's entities were not known yet; cleared by [DashboardStore.fillPending].
+     */
+    val pendingDeviceId: String? = null,
     /** Optional text under the title, for every section type. */
     val text: String = "",
     val collapsed: Boolean = false,
     /** The header has a collapse arrow (not for headings). */
     val collapsible: Boolean = true,
-    /** Tile columns for tile and device sections; 0 = automatic (2 on phones, 4 on wide screens). */
+    /** Tile columns for tile sections; 0 = automatic (2 on phones, 4 on wide screens). */
     val columns: Int = 0,
-    /** In tile and device sections, sensors, binary and text sensors go to a compact list under the tiles. */
+    /** In tile sections, sensors, binary and text sensors go to a compact list under the tiles. */
     val readingsAsList: Boolean = true,
     /** Label entities of tile and list sections with their device name. */
     val showDeviceNames: Boolean = true,
-    /** Include configuration entities in a device section. */
-    val showConfig: Boolean = true,
-    /** Include diagnostic entities in a device section. */
-    val showDiagnostic: Boolean = true,
     /** Title size; null uses the type's default ([titleSizeOrDefault]). */
     val titleSize: TitleSize? = null,
     /** What tapping a tile or row does. */
     val tapAction: TapAction = TapAction.CONTROLS,
     /** An all on / all off button in the header when the section has lights, switches or fans. */
     val allOnOff: Boolean = true,
+    /** Keep the all on / all off button in the header while the section is collapsed. */
+    val allOnOffWhenCollapsed: Boolean = true,
+    /** Colour of the title and its icon. */
+    val titleColor: TitleColor = TitleColor.DEFAULT,
+    /** RGB of a [TitleColor.CUSTOM] title colour (opaque ARGB int). */
+    val customColor: Int? = null,
+    /** MDI name (without "mdi:") of the icon before the title; null for none. */
+    val icon: String? = null,
 ) {
     val hasEntities: Boolean get() = type != SectionType.HEADING
     val titleSizeOrDefault: TitleSize get() = titleSize ?: if (type == SectionType.HEADING) TitleSize.H3 else TitleSize.H4
-    val hasTiles: Boolean get() = type == SectionType.TILES || type == SectionType.COMPACT || type == SectionType.DEVICE
+    val hasTiles: Boolean get() = type == SectionType.TILES || type == SectionType.COMPACT
     /** Tiles, list and compact tiles hold the same chosen entities, so the style can change at any time. */
     val hasChosenItems: Boolean get() = type in CHOSEN_ITEM_TYPES
 
@@ -87,7 +102,7 @@ data class DashboardSettings(
 
 data class Dashboard(val id: String, val name: String, val sections: List<Section> = emptyList(), val settings: DashboardSettings = DashboardSettings()) {
     /** Devices referenced by any section. */
-    val deviceIds: Set<String> get() = sections.flatMap { s -> s.items.map { it.deviceId } + listOfNotNull(s.deviceId) }.toSet()
+    val deviceIds: Set<String> get() = sections.flatMap { s -> s.items.map { it.deviceId } + listOfNotNull(s.pendingDeviceId) }.toSet()
 }
 
 /** Ways to start a new dashboard. */
@@ -149,10 +164,27 @@ class DashboardStore(private val prefs: SharedPreferences) {
     /** Drops every reference to a device that was removed from the app. */
     fun forgetDevice(deviceId: String) {
         dashboards = dashboards.map { d ->
-            d.copy(sections = d.sections.filterNot { it.type == SectionType.DEVICE && it.deviceId == deviceId }
+            d.copy(sections = d.sections.filterNot { it.pendingDeviceId == deviceId }
                 .map { s -> s.copy(items = s.items.filterNot { it.deviceId == deviceId }) })
         }
         save()
+    }
+
+    /**
+     * Adds a device's main entities to sections waiting for them ([Section.pendingDeviceId]) once they are known,
+     * and drops waiting sections whose device is no longer in the app.
+     */
+    fun fillPending(deviceExists: (String) -> Boolean, entities: (String) -> List<Entity>) {
+        var changed = false
+        val filled = dashboards.map { d ->
+            d.copy(sections = d.sections.mapNotNull { s ->
+                val id = s.pendingDeviceId ?: return@mapNotNull s
+                if (!deviceExists(id)) { changed = true; return@mapNotNull null }
+                val main = mainEntities(id, entities(id))
+                if (main.isEmpty()) s else { changed = true; s.copy(items = (s.items + main).distinct(), pendingDeviceId = null) }
+            })
+        }
+        if (changed) { dashboards = filled; save() }
     }
 
     private fun editSection(id: String, sectionId: String, change: (Section) -> Section) =
@@ -188,13 +220,21 @@ class DashboardStore(private val prefs: SharedPreferences) {
             "Buttons" to { p -> p == Platform.Button },
         )
 
+        private fun mainEntities(deviceId: String, entities: List<Entity>) = entities.filter { it.category == EntityCategory.NONE }.map { ItemRef(deviceId, it.stableId) }
+
+        /** A tile section of one device's main entities, or one waiting for them when they are not known yet. */
+        private fun deviceSection(device: LocationStore.Device, entities: (String) -> List<Entity>): Section {
+            val main = mainEntities(device.id, entities(device.id))
+            return Section(type = SectionType.TILES, title = device.name, items = main, showDeviceNames = false, pendingDeviceId = device.id.takeIf { main.isEmpty() })
+        }
+
         fun buildSections(template: DashboardTemplate, devices: List<LocationStore.Device>, entities: (String) -> List<Entity>, area: (String) -> String?): List<Section> {
             return when (template) {
                 DashboardTemplate.Empty -> emptyList()
                 is DashboardTemplate.Devices -> devices.filter { template.locationId == null || it.locationId == template.locationId }
-                    .map { Section(type = SectionType.DEVICE, title = it.name, deviceId = it.id) }
+                    .map { deviceSection(it, entities) }
                 DashboardTemplate.ByArea -> devices.groupBy { area(it.id)?.takeIf { a -> a.isNotBlank() } ?: "No area" }.toSortedMap(compareBy<String> { it == "No area" }.thenBy { it })
-                    .flatMap { (areaName, inArea) -> listOf(Section(type = SectionType.HEADING, title = areaName)) + inArea.map { Section(type = SectionType.DEVICE, title = it.name, deviceId = it.id) } }
+                    .flatMap { (areaName, inArea) -> listOf(Section(type = SectionType.HEADING, title = areaName)) + inArea.map { deviceSection(it, entities) } }
                 DashboardTemplate.ByType -> {
                     val all = devices.flatMap { d -> entities(d.id).filter { it.category == EntityCategory.NONE }.map { d.id to it } }
                     TYPE_GROUPS.mapNotNull { (title, matches) ->
@@ -212,6 +252,15 @@ class DashboardStore(private val prefs: SharedPreferences) {
 
 /** JSON form of a dashboard; unknown fields fall back to defaults so older saves keep loading. */
 object DashboardCodec {
+    /** Section icon keys saved before MDI icons (no "mdi:" prefix) and the MDI icon each became; other keys are MDI names already. */
+    val LEGACY_ICON_KEYS = mapOf(
+        "kitchen" to "fridge", "bath" to "bathtub", "office" to "briefcase", "garden" to "flower", "window" to "window-closed-variant",
+        "light" to "lightbulb", "power" to "power-plug", "tv" to "television", "camera" to "cctv", "washer" to "washing-machine",
+        "sensors" to "motion-sensor", "climate" to "thermometer", "ac" to "snowflake", "heating" to "fire", "air" to "weather-windy",
+        "sun" to "weather-sunny", "night" to "weather-night", "bolt" to "flash", "eco" to "leaf", "chart" to "chart-bar",
+        "security" to "shield-home", "favourite" to "heart", "pets" to "paw", "clock" to "clock-outline",
+    )
+
     fun encode(d: Dashboard): JSONObject = JSONObject().put("id", d.id).put("name", d.name)
         .put("sections", JSONArray().apply { d.sections.forEach { put(encodeSection(it)) } })
         .put("settings", encodeSettings(d.settings))
@@ -224,30 +273,35 @@ object DashboardCodec {
     }
 
     private fun encodeSection(s: Section) = JSONObject().put("id", s.id).put("type", s.type.name).put("title", s.title).put("text", s.text)
-        .put("collapsed", s.collapsed).put("deviceId", s.deviceId ?: JSONObject.NULL)
+        .put("collapsed", s.collapsed).put("pendingDeviceId", s.pendingDeviceId ?: JSONObject.NULL)
         .put("collapsible", s.collapsible).put("columns", s.columns).put("readingsAsList", s.readingsAsList)
-        .put("showDeviceNames", s.showDeviceNames).put("showConfig", s.showConfig).put("showDiagnostic", s.showDiagnostic)
-        .put("tapAction", s.tapAction.name).put("titleSize", s.titleSize?.name ?: JSONObject.NULL).put("allOnOff", s.allOnOff)
+        .put("showDeviceNames", s.showDeviceNames)
+        .put("tapAction", s.tapAction.name).put("titleSize", s.titleSize?.name ?: JSONObject.NULL).put("allOnOff", s.allOnOff).put("allOnOffWhenCollapsed", s.allOnOffWhenCollapsed).put("titleColor", s.titleColor.name).put("customColor", s.customColor?.let { "#%06X".format(it and 0xFFFFFF) } ?: JSONObject.NULL).put("icon", s.icon?.let { "mdi:$it" } ?: JSONObject.NULL)
         .put("items", JSONArray().apply { s.items.forEach { put(JSONObject().put("deviceId", it.deviceId).put("stableId", it.stableId)) } })
 
     private fun decodeSection(o: JSONObject, legacy: JSONObject? = null): Section {
         val items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { ItemRef(it.getString("deviceId"), it.getString("stableId")) } } }.orEmpty()
         val d = Section(id = "", type = SectionType.HEADING)
         fun bool(key: String, legacyKey: String, default: Boolean) = o.optBoolean(key, legacy?.optBoolean(legacyKey, default) ?: default)
-        return Section(o.getString("id"), SectionType.valueOf(o.getString("type")), o.optString("title"), items,
-            if (o.has("deviceId") && !o.isNull("deviceId")) o.getString("deviceId") else null, o.optString("text"), o.optBoolean("collapsed"),
+        fun string(key: String) = if (o.has(key) && !o.isNull(key)) o.getString(key) else null
+        // Old "Device" sections become tile sections that fill with the device's main entities.
+        val oldDevice = o.getString("type") == "DEVICE"
+        return Section(o.getString("id"), if (oldDevice) SectionType.TILES else SectionType.valueOf(o.getString("type")), o.optString("title"), items,
+            string("pendingDeviceId") ?: if (oldDevice) string("deviceId") else null, o.optString("text"), o.optBoolean("collapsed"),
             collapsible = bool("collapsible", "collapsibleSections", d.collapsible),
             columns = o.optInt("columns", legacy?.optInt("columns", d.columns) ?: d.columns),
             readingsAsList = bool("readingsAsList", "readingsAsList", d.readingsAsList),
-            showDeviceNames = bool("showDeviceNames", "showDeviceNames", d.showDeviceNames),
-            showConfig = bool("showConfig", "showConfigDiagnostic", d.showConfig),
-            showDiagnostic = bool("showDiagnostic", "showConfigDiagnostic", d.showDiagnostic),
+            showDeviceNames = if (oldDevice) false else bool("showDeviceNames", "showDeviceNames", d.showDeviceNames),
             tapAction = o.optString("tapAction").let { name -> TapAction.entries.firstOrNull { it.name == name } } ?: when {
                 legacy?.optBoolean("tapToToggle") == true -> TapAction.TOGGLE
                 legacy?.optBoolean("controlsSheet", true) == false -> TapAction.NONE
                 else -> d.tapAction
             },
             allOnOff = o.optBoolean("allOnOff", d.allOnOff),
+            allOnOffWhenCollapsed = o.optBoolean("allOnOffWhenCollapsed", d.allOnOffWhenCollapsed),
+            titleColor = TitleColor.entries.firstOrNull { it.name == o.optString("titleColor") } ?: d.titleColor,
+            customColor = string("customColor")?.removePrefix("#")?.toIntOrNull(16)?.let { it or 0xFF000000.toInt() },
+            icon = string("icon")?.let { saved -> if (saved.startsWith("mdi:")) saved.removePrefix("mdi:") else LEGACY_ICON_KEYS[saved] ?: saved },
             titleSize = if (o.isNull("titleSize")) null else TitleSize.entries.firstOrNull { it.name == o.optString("titleSize") },
         )
     }

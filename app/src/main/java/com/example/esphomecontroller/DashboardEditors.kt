@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -60,7 +61,7 @@ fun NewDashboardDialog(store: LocationStore, onDismiss: () -> Unit, onCreate: (S
     )
 }
 
-/** Adds a section (type, title, device or text, and its options) or edits an existing one. */
+/** Adds a section (type, title size, title and text) or edits one, including its style and options. */
 @Composable
 fun SectionDialog(existing: Section?, store: LocationStore, onDismiss: () -> Unit, onSave: (Section) -> Unit) {
     var type by remember { mutableStateOf(existing?.type ?: SectionType.TILES) }
@@ -68,8 +69,7 @@ fun SectionDialog(existing: Section?, store: LocationStore, onDismiss: () -> Uni
     var titleSize by remember { mutableStateOf(existing?.titleSize) }
     var title by remember { mutableStateOf(existing?.title ?: "") }
     var text by remember { mutableStateOf(existing?.text ?: "") }
-    var deviceId by remember { mutableStateOf(existing?.deviceId ?: store.devices.firstOrNull()?.id) }
-    val valid = when (type) { SectionType.DEVICE -> deviceId != null; SectionType.HEADING -> title.isNotBlank() || text.isNotBlank(); else -> true }
+    val valid = type != SectionType.HEADING || title.isNotBlank() || text.isNotBlank()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Add section" else "Edit section") },
@@ -86,25 +86,23 @@ fun SectionDialog(existing: Section?, store: LocationStore, onDismiss: () -> Uni
                     }
                     Spacer(Modifier.height(8.dp))
                 }
-                OutlinedTextField(title, { title = it }, label = { Text(if (type == SectionType.DEVICE) "Title (optional, defaults to the device name)" else "Title (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(text, { text = it }, label = { Text("Text") }, modifier = Modifier.fillMaxWidth())
                 Text("Title size", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     val effective = titleSize ?: Section(type = type).titleSizeOrDefault
                     TitleSize.entries.forEach { size -> FilterChip(selected = effective == size, onClick = { titleSize = size }, label = { Text(size.label, style = size.textStyle().copy(fontSize = MaterialTheme.typography.labelLarge.fontSize)) }) }
                 }
-                OutlinedTextField(text, { text = it }, label = { Text("Text (optional)") }, modifier = Modifier.fillMaxWidth())
-                if (type == SectionType.DEVICE) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Device", style = MaterialTheme.typography.titleSmall)
-                    if (store.devices.isEmpty()) Text("No devices in the app yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    store.devices.forEach { d -> RadioRow(deviceId == d.id, d.name, store.locationName(d.locationId)) { deviceId = d.id } }
+                // Title colour, icon and options are set when editing, so adding a section stays short.
+                if (existing != null) {
+                    TitleLook(o, title, titleSize ?: Section(type = type).titleSizeOrDefault) { o = it }
+                    if (type != SectionType.HEADING) SectionOptions(o.copy(type = type)) { o = it }
                 }
-                if (type != SectionType.HEADING) SectionOptions(o.copy(type = type)) { o = it }
             }
         },
         confirmButton = {
             TextButton(enabled = valid, onClick = {
-                onSave(o.copy(type = type, titleSize = titleSize, title = title.trim(), text = text.trim(), deviceId = if (type == SectionType.DEVICE) deviceId else null))
+                onSave(o.copy(type = type, titleSize = titleSize, title = title.trim(), text = text.trim()))
             }) { Text(if (existing == null) "Add" else "Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -137,7 +135,7 @@ fun EntityPicker(store: LocationStore, manager: ConnectionManager, selected: Lis
                             Row(Modifier.fillMaxWidth().clickable { chosen = if (on) chosen - ref else chosen + ref }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = on, onCheckedChange = null)
                                 Spacer(Modifier.width(8.dp))
-                                Icon(entityIcon(e), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                                EntityIcon(e, size = 22.dp)
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(e.name)
@@ -167,12 +165,9 @@ private fun SectionOptions(s: Section, onChange: (Section) -> Unit) {
         SwitchRow("Readings as a list", "Sensors and text values in a compact list under the tiles", s.readingsAsList) { onChange(s.copy(readingsAsList = it)) }
     }
     if (s.hasChosenItems) SwitchRow("Device names", "Under each entity name", s.showDeviceNames) { onChange(s.copy(showDeviceNames = it)) }
-    if (s.type == SectionType.DEVICE) {
-        SwitchRow("Configuration entities", null, s.showConfig) { onChange(s.copy(showConfig = it)) }
-        SwitchRow("Diagnostic entities", null, s.showDiagnostic) { onChange(s.copy(showDiagnostic = it)) }
-    }
     SwitchRow("All on / all off button", "When the section has lights, switches or fans", s.allOnOff) { onChange(s.copy(allOnOff = it)) }
     SwitchRow("Collapsible", null, s.collapsible) { onChange(s.copy(collapsible = it)) }
+    if (s.allOnOff && s.collapsible) SwitchRow("Keep all on / all off when collapsed", "The button stays in the header of a collapsed section", s.allOnOffWhenCollapsed) { onChange(s.copy(allOnOffWhenCollapsed = it)) }
     Text("Tap action", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
     TapAction.entries.forEach { a -> RadioRow(s.tapAction == a, a.label, a.description) { onChange(s.copy(tapAction = a)) } }
 }
