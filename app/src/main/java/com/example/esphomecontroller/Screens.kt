@@ -212,7 +212,7 @@ private fun deviceFacts(device: LocationStore.Device, details: DeviceDetails?): 
 private fun LazyListScope.entitySection(title: String, entities: List<Entity>, session: ControlSession?, live: List<Entity>) {
     if (entities.isEmpty()) return
     item(key = "header:$title") {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp, start = 2.dp))
+        PageSectionTitle(title, Modifier.padding(top = GroupGap))
     }
     // One card per section, rows separated by dividers.
     item(key = "group:$title") {

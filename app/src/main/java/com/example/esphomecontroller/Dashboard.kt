@@ -88,7 +88,7 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
         }
 
         val list: @Composable () -> Unit = {
-            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(PageGap + GroupGap), contentPadding = PaddingValues(bottom = 20.dp)) {
                 if (board.sections.isEmpty()) item {
                     Text(if (editing) "Add a section to start building this dashboard." else "This dashboard is empty. Tap the pencil to add sections.",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -178,7 +178,7 @@ private fun SectionView(
     // Sections that can show header buttons always keep their height, so the title doesn't move when the all on/off button appears.
     val hasButtons = editing || section.allOnOff || (section.collapsible && section.hasEntities)
     val hasTitle = section.title.isNotBlank() || sectionIcon(section.icon) != null
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(PageGap)) {
         Row(Modifier.fillMaxWidth().then(if (hasButtons || hasTitle) Modifier.heightIn(min = HeaderButtonRow) else Modifier), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 val title = section.title
@@ -235,9 +235,9 @@ private fun SectionView(
 private fun TilesAndReadings(items: List<Resolved>, settings: DashboardSettings, columns: Int, asList: Boolean, editing: Boolean, showDevice: Boolean, open: ((ItemRef) -> Unit)?, itemTools: (@Composable (Resolved) -> Unit)?, compact: Boolean = false) {
     val tiles = items.filter { !asList || it.entity == null || !it.entity.platform.isReadOnly }
     val readings = if (asList) items.filter { it.entity?.platform?.isReadOnly == true } else emptyList()
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(PageGap)) {
         tiles.chunked(columns).forEach { row ->
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(PageGap)) {
                 row.forEach { r ->
                     val m = Modifier.weight(1f).fillMaxHeight().alpha(if (settings.dimOffline && r.session.isOffline) 0.5f else 1f)
                     val toolsFor: (@Composable () -> Unit)? = if (editing && itemTools != null) { { itemTools(r) } } else null
@@ -340,5 +340,9 @@ private fun EntitySheet(
     }
 }
 
-/** Section header buttons: their 40 dp pressed/focus circle plus 2 dp of space around it, so it never touches the header divider or the cards. */
-private val HeaderButtonRow = 44.dp
+/**
+ * Height of a section's header row, the title's own height, so the title starts the same 12 dp below the page header as
+ * the first card on other pages. The 40 dp pressed/focus circle of its buttons reaches 6 dp beyond the row: still 6 dp
+ * clear of the header divider above and, with the section's PageGap, 6 dp clear of the cards below.
+ */
+private val HeaderButtonRow = 28.dp

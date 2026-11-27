@@ -151,7 +151,7 @@ private fun LocationsSettings(store: LocationStore, onBack: () -> Unit) {
 private fun AppearanceSettings(store: LocationStore, onBack: () -> Unit) {
     ScreenHeader("Appearance", navigation = HeaderNavigation.back("Back to settings", onBack))
     SettingsList {
-        item { PageSectionTitle("Theme", Modifier.padding(start = 4.dp)) }
+        item { PageSectionTitle("Theme") }
         item {
             SettingsGroup {
                 LocationStore.THEMES.forEachIndexed { i, value ->
@@ -173,7 +173,7 @@ private fun AppearanceSettings(store: LocationStore, onBack: () -> Unit) {
                 }
             }
         }
-        item { PageSectionTitle("Navigation", Modifier.padding(start = 4.dp, top = 8.dp)) }
+        item { PageSectionTitle("Navigation", Modifier.padding(top = GroupGap)) }
         item {
             SettingsGroup {
                 SettingsRow(Icons.Default.Title, AppearanceColor, "Navigation labels", "Show text under the bottom navigation icons", onClick = { store.changeNavLabels(!store.navLabels) }) {
@@ -247,7 +247,7 @@ private fun RowMenu(items: @Composable ColumnScope.(close: () -> Unit) -> Unit) 
 
 @Composable
 private fun SettingsNote(text: String) =
-    Text(text, Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable
 private fun RenameDialog(title: String, initial: String, confirm: String = "Save", onDismiss: () -> Unit, onSave: (String) -> Unit) {

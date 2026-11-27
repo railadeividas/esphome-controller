@@ -167,7 +167,7 @@ fun DeviceSetupScreen(
     ) {
         TextButton(enabled = !busy, onClick = ::save) { Text(if (isNew) "Add" else "Save") }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(PageGap)) {
 
         discovered?.let { d ->
             Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
@@ -205,7 +205,7 @@ fun DeviceSetupScreen(
             if (!isWebMode(mode)) OutlinedButton(enabled = !busy && host.isNotBlank(), onClick = ::lookUp) { Text("Look up device") }
         }
 
-        Text("Connection", style = MaterialTheme.typography.titleSmall)
+        PageSectionTitle("Connection", Modifier.padding(top = GroupGap))
         modes.forEach { option ->
             val (label, description) = MODE_LABELS.getValue(option)
             Row(

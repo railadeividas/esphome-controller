@@ -167,7 +167,11 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 EntityIcon(entity, size = TileIconSize)
-                if (p.isToggle) {
+                // In edit mode the tools replace the power button or value, so they never cover them.
+                if (overlay != null) {
+                    Spacer(Modifier.weight(1f))
+                    Box(Modifier.layoutHeight(TileIconSize).offset(x = (48.dp - TileIconSize) / 2)) { overlay() }
+                } else if (p.isToggle) {
                     Spacer(Modifier.weight(1f))
                     // Laid out at icon height and overhanging the row, so toggle tiles line up with tiles without a button;
                     // shifted right by the same overhang so the gap to the card's right edge matches the gap above it.
@@ -195,7 +199,6 @@ fun EntityTile(entity: Entity, session: ControlSession?, live: Entity?, modifier
             }
         }
         if (pending) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(10.dp).size(16.dp), strokeWidth = 2.dp)
-        overlay?.invoke(this)
       }
     }
 }
@@ -232,8 +235,8 @@ fun CompactTile(entity: Entity, session: ControlSession?, live: Entity?, modifie
                     Text(compactState(entity, style.brightnessPercent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (pending) CircularProgressIndicator(Modifier.padding(start = 6.dp).size(14.dp), strokeWidth = 2.dp)
+                overlay?.let { Box { it() } }
             }
-            overlay?.invoke(this)
         }
     }
 }

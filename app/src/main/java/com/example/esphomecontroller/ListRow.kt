@@ -17,8 +17,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** Space between cards in a page's list (Devices, Discover, device page, Settings). */
+/**
+ * The one gap between elements of a page: below the header, between cards, fields and tiles, and between a heading and
+ * its content. Page text and headings start at the card edge (no extra inset).
+ */
 val PageGap = 12.dp
+
+/** Extra space above a heading that follows other content (so groups are PageGap + GroupGap = 20 dp apart). */
+val GroupGap = 8.dp
 
 /** Size of the round icon at the start of an [AppListRow]. */
 val ListIconSize = 38.dp

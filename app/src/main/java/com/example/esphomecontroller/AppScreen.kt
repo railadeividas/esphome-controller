@@ -80,7 +80,7 @@ fun AppScreen(store: LocationStore, dashboards: DashboardStore, discovered: Map<
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
           Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(PageGap)) {
                     val setup = editing
                     if (setup != null) DeviceSetupScreen(setup, discovered[setup.id], isNew, manager.secrets, store.locations.map { it.id to it.name }, defaultLocation = setup.locationId ?: if (isNew) store.selected else null, onDismiss = { editing = null }, onSave = { updated ->
                         // A different interface yields different entity identities; drop the old cached ones.
