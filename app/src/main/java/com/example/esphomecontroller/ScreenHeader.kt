@@ -32,6 +32,9 @@ class HeaderNavigation(val icon: ImageVector, val description: String, val onCli
 /** The side padding AppScreen gives every page. */
 private val PagePadding = 16.dp
 
+/** Extra space under the header, so content starts 12 dp below its divider on every page. */
+private val HeaderContentGap = 4.dp
+
 /**
  * The header every page uses: a tonal 64 dp bar (same tone as the bottom navigation), separated from the content by a full-width divider, with an optional back/close button, a titleLarge title
  * with an optional one-line subtitle, and trailing actions (icon buttons, or a text button to confirm).
@@ -51,8 +54,10 @@ fun ScreenHeader(
     // Its tone matches the bottom navigation bar and also fills the status bar area above it.
     val barColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
     val statusBarHeight = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+    // Every page's content starts the same distance below the header: this bottom padding plus AppScreen's 8 dp spacing.
     Column(
         Modifier
+            .padding(bottom = HeaderContentGap)
             .layout { measurable, constraints ->
                 val bleed = PagePadding.roundToPx()
                 val width = constraints.maxWidth + 2 * bleed
@@ -86,4 +91,4 @@ fun ScreenHeader(
 /** A heading inside a page (e.g. a Settings section), styled so it does not read as a page title. */
 @Composable
 fun PageSectionTitle(text: String, modifier: Modifier = Modifier) =
-    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = modifier.padding(top = 8.dp).semantics { heading() })
+    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = modifier.semantics { heading() })

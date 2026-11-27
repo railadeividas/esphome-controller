@@ -105,7 +105,7 @@ fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevic
     }
     // The spinner and the list show progress and results; only explain failures.
     if (!scan.scanning) scan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(PageGap), contentPadding = PaddingValues(bottom = 20.dp)) {
         if (available.isEmpty() && !scan.scanning && !scan.finished) item {
             Text("Tap Refresh to search for devices on this network.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -121,17 +121,12 @@ fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevic
             }
         }
         items(available, key = { it.serviceName }) { d ->
-            Card(onClick = { onSetup(LocationStore.Device(d.serviceName, d.displayName, d.address)) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(d.displayName, style = MaterialTheme.typography.titleMedium)
-                        if (d.summary.isNotBlank()) Text(d.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(encryptionText(d.encryption), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    EncryptionIcon(d.encryption)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Set up", color = MaterialTheme.colorScheme.primary)
-                }
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+                AppListRow(
+                    d.displayName, listOf(d.summary, encryptionText(d.encryption)).filter { it.isNotBlank() }.joinToString(" · "),
+                    leading = { CircleIcon(Icons.Default.Memory, MaterialTheme.colorScheme.primary) },
+                    onClick = { onSetup(LocationStore.Device(d.serviceName, d.displayName, d.address)) }, chevron = true,
+                ) { EncryptionIcon(d.encryption) }
             }
         }
         item { OutlinedButton(onClick = { onSetup(LocationStore.Device("manual:${UUID.randomUUID()}", "", "")) }) { Text("Add a device by address") } }
@@ -141,12 +136,12 @@ fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevic
 /** A device's icon: a bulb when it has lights, otherwise a generic board. */
 fun deviceIcon(entities: List<Entity>): ImageVector = if (entities.any { it.platform is Platform.Light }) Icons.Default.Lightbulb else Icons.Default.Memory
 
-/** Rounded device icon in a primary-tinted square, with a connection badge on its corner. */
+/** Device icon in a filled circle (like the Settings icons), with a connection badge on its corner. */
 @Composable
-private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp) {
+private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = ListIconSize) {
     Box(Modifier.size(size)) {
-        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(size * 0.3f)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(size * 0.56f))
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(size * 0.58f))
         }
         Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(13.dp).background(MaterialTheme.colorScheme.surface, CircleShape).padding(2.dp)
             .background(if (connected) Color(0xFF36A76B) else Color(0xFFAAA7B2), CircleShape))
@@ -158,20 +153,16 @@ fun DeviceListScreen(store: LocationStore, manager: ConnectionManager, onOpen: (
     val location = store.location
     ScreenHeader("Devices", subtitle = deviceCount(store.devices.size))
     if (store.devices.isEmpty()) Text("No devices yet. Add one from Discover.")
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(PageGap), contentPadding = PaddingValues(bottom = 20.dp)) {
         items(store.devices, key = { it.id }) { d ->
             val session = manager.sessions[d.id]
-            Card(onClick = { onOpen(d.id) }, modifier = Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DeviceAvatar(deviceIcon(manager.entities(d.id)), session.isConnected)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(d.name, style = MaterialTheme.typography.titleMedium)
-                        placeLine(store.locationName(d.locationId), manager.details(d.id)?.area)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Text(connectionSummary(session, manager.setupErrors[d.id], manager.lastSeen(d.id)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            val setupError = manager.setupErrors[d.id]
+            Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
+                AppListRow(
+                    d.name, listOfNotNull(placeLine(store.locationName(d.locationId), manager.details(d.id)?.area), connectionSummary(session, setupError, manager.lastSeen(d.id))).joinToString(" · "),
+                    leading = { DeviceAvatar(deviceIcon(manager.entities(d.id)), session.isConnected) },
+                    onClick = { onOpen(d.id) }, chevron = true, summaryIsError = setupError != null,
+                )
             }
         }
     }
@@ -195,7 +186,7 @@ fun DeviceDetailScreen(store: LocationStore, manager: ConnectionManager, device:
         IconButton(onClick = { showLogs = true }) { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = "Device logs") }
         IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Edit device") }
     }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(PageGap), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

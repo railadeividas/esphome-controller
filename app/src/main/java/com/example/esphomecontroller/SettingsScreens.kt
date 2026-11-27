@@ -154,7 +154,7 @@ private fun AppearanceSettings(store: LocationStore, onBack: () -> Unit) {
                 LocationStore.THEMES.forEachIndexed { i, value ->
                     if (i > 0) SettingsDivider()
                     Row(
-                        Modifier.fillMaxWidth().selectable(selected = store.theme == value, role = Role.RadioButton, onClick = { store.changeTheme(value) }).padding(horizontal = 16.dp, vertical = 12.dp),
+                        Modifier.fillMaxWidth().selectable(selected = store.theme == value, role = Role.RadioButton, onClick = { store.changeTheme(value) }).heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(if (value == "system") "System default" else themeLabel(value), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
@@ -163,7 +163,7 @@ private fun AppearanceSettings(store: LocationStore, onBack: () -> Unit) {
                 }
             }
         }
-        item { PageSectionTitle("Navigation", Modifier.padding(start = 4.dp)) }
+        item { PageSectionTitle("Navigation", Modifier.padding(start = 4.dp, top = 8.dp)) }
         item {
             SettingsGroup {
                 SettingsRow(Icons.Default.Title, AppearanceColor, "Navigation labels", "Show text under the bottom navigation icons", onClick = { store.changeNavLabels(!store.navLabels) }) {
@@ -195,7 +195,7 @@ private fun AboutSettings(onBack: () -> Unit) {
 
 @Composable
 private fun SettingsList(content: LazyListScope.() -> Unit) =
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp), content = content)
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(PageGap), contentPadding = PaddingValues(bottom = 20.dp), content = content)
 
 /** A rounded card holding related rows, separated by inset dividers. */
 @Composable
@@ -204,30 +204,14 @@ private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) =
 
 /** Divider starting under the row text, past the icon. */
 @Composable
-private fun SettingsDivider() = HorizontalDivider(Modifier.padding(start = 70.dp, end = 16.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+private fun SettingsDivider() = HorizontalDivider(Modifier.padding(start = ListTextInset, end = 16.dp), color = MaterialTheme.colorScheme.surfaceVariant)
 
 @Composable
 private fun SettingsRow(
     icon: ImageVector, color: Color, title: String, summary: String?,
     onClick: (() -> Unit)? = null, chevron: Boolean = false,
     trailing: @Composable RowScope.() -> Unit = {},
-) {
-    Row(
-        (if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(38.dp).background(color, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!summary.isNullOrBlank()) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        trailing()
-        if (chevron) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-    }
-}
+) = AppListRow(title, summary, leading = { CircleIcon(icon, color) }, onClick = onClick, chevron = chevron, trailing = trailing)
 
 @Composable
 private fun RowMenu(items: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
