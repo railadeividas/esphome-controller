@@ -119,17 +119,12 @@ private fun LocationsSettings(store: LocationStore, onBack: () -> Unit) {
     var deleting by remember { mutableStateOf<LocationStore.Location?>(null) }
     ScreenHeader("Locations", subtitle = count(store.locations.size, "location"), navigation = HeaderNavigation.back("Back to settings", onBack))
     SettingsList {
-        item { SettingsNote("Locations organise devices. New devices are added to the checked location; tap a location to check it.") }
+        item { SettingsNote("Locations organise devices. New devices have no location; set one when you edit a device.") }
         item {
             SettingsGroup {
                 store.locations.forEachIndexed { i, l ->
                     if (i > 0) SettingsDivider()
-                    val selected = l.id == store.selected
-                    SettingsRow(
-                        if (selected) Icons.Default.CheckCircle else Icons.Default.Place, LocationsColor, l.name,
-                        listOfNotNull(deviceCount(l.devices.size), "new devices go here".takeIf { selected }).joinToString(" · "),
-                        onClick = { store.select(l.id) },
-                    ) {
+                    SettingsRow(Icons.Default.Place, LocationsColor, l.name, deviceCount(l.devices.size)) {
                         RowMenu { close ->
                             DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { close(); renaming = l })
                             if (store.locations.size > 1) DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { close(); deleting = l })

@@ -72,7 +72,7 @@ private fun securityLabel(device: LocationStore.Device): String = when (device.m
 fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (LocationStore.Device) -> Unit) {
     val location = store.location
     val available = discovered.values.filterNot { d -> store.contains(d.serviceName) }.sortedBy { it.displayName.lowercase() }
-    ScreenHeader("Discover", subtitle = "New devices are added to ${location.name}") {
+    ScreenHeader("Discover", subtitle = "Devices on this network") {
         if (scan.scanning) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             TextButton(onClick = scan.stop) { Text("Stop") }
