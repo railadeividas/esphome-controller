@@ -222,7 +222,7 @@ fun DashboardSettingsSheet(board: Dashboard, dashboards: DashboardStore, onDismi
 fun DashboardsSettings(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager) {
     var creating by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Dashboard?>(null) }
-    Text("Dashboards", style = MaterialTheme.typography.titleLarge)
+    PageSectionTitle("Dashboards")
     dashboards.dashboards.forEachIndexed { i, d ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { dashboards.setDefault(d.id) }) {

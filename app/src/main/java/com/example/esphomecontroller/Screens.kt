@@ -8,6 +8,8 @@ import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.ui.draw.clip
@@ -95,12 +97,11 @@ fun DeviceInfoLines(device: LocationStore.Device, session: ControlSession?, setu
 fun DiscoverScreen(store: LocationStore, discovered: Map<String, DiscoveredDevice>, scan: ScanControls, onSetup: (LocationStore.Device) -> Unit) {
     val location = store.location
     val available = discovered.values.filterNot { d -> store.contains(d.serviceName) }.sortedBy { it.displayName.lowercase() }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text("Add a device", style = MaterialTheme.typography.titleLarge); Text("New devices are added to ${location.name}; you can change this during setup.", style = MaterialTheme.typography.bodySmall) }
+    ScreenHeader("Discover", subtitle = "New devices are added to ${location.name}") {
         if (scan.scanning) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             TextButton(onClick = scan.stop) { Text("Stop") }
-        } else TextButton(onClick = scan.start) { Text("Refresh") }
+        } else IconButton(onClick = scan.start) { Icon(Icons.Default.Refresh, contentDescription = "Search for devices") }
     }
     // The spinner and the list show progress and results; only explain failures.
     if (!scan.scanning) scan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -155,8 +156,7 @@ private fun DeviceAvatar(icon: ImageVector, connected: Boolean, size: Dp = 42.dp
 @Composable
 fun DeviceListScreen(store: LocationStore, manager: ConnectionManager, onOpen: (String) -> Unit) {
     val location = store.location
-    Text("Devices", style = MaterialTheme.typography.titleLarge)
-    Text(deviceCount(store.devices.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    ScreenHeader("Devices", subtitle = deviceCount(store.devices.size))
     if (store.devices.isEmpty()) Text("No devices yet. Add one from Discover.")
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         items(store.devices, key = { it.id }) { d ->
@@ -187,15 +187,15 @@ fun DeviceDetailScreen(store: LocationStore, manager: ConnectionManager, device:
     val entities = manager.entities(device.id)
     val details = manager.details(device.id)
     val setupError = manager.setupErrors[device.id]
+    val place = placeLine(store.locationName(device.locationId), details?.area)
+    ScreenHeader(
+        device.name, subtitle = listOfNotNull(place, connectionSummary(session, setupError)).joinToString(" · "), subtitleIsError = setupError != null,
+        navigation = HeaderNavigation.back("Back to devices", onBack),
+    ) {
+        IconButton(onClick = { showLogs = true }) { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = "Device logs") }
+        IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Edit device") }
+    }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to devices") }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { showLogs = true }) { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = "Device logs") }
-                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Edit device") }
-            }
-        }
         item {
             Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -252,14 +252,11 @@ private fun DeviceLogs(device: LocationStore.Device, session: ControlSession?, o
     val logs = session?.logs.orEmpty().let { all -> if (showStates) all else all.filterNot { it.startsWith(STATE_LOG_PREFIX) } }
     val listState = rememberLazyListState()
     LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.scrollToItem(logs.lastIndex) }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onBack) { Text("‹ ${device.name}") }
-    }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Device logs", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-        Text("State updates", style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.width(8.dp))
-        Switch(checked = showStates, onCheckedChange = { showStates = it })
+    ScreenHeader("Logs", subtitle = device.name, navigation = HeaderNavigation.back("Back to ${device.name}", onBack)) {
+        IconToggleButton(checked = showStates, onCheckedChange = { showStates = it }) {
+            Icon(Icons.Default.FilterList, contentDescription = if (showStates) "Hide state updates" else "Show state updates",
+                tint = if (showStates) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     Text("Shown while this page is open and kept only in memory. Logs can include network details; take care when sharing screenshots.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (!session.isConnected) Text(connectionSummary(session, null), style = MaterialTheme.typography.bodySmall)
@@ -288,10 +285,11 @@ private fun LazyListScope.entitySection(title: String, entities: List<Entity>, s
 @Composable
 fun SettingsScreen(store: LocationStore, dashboards: DashboardStore, manager: ConnectionManager) {
     var newLocation by remember { mutableStateOf("") }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    ScreenHeader("Settings")
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
         item { DashboardsSettings(store, dashboards, manager); Spacer(Modifier.height(20.dp)) }
         item {
-            Text("Locations", style = MaterialTheme.typography.titleLarge)
+            PageSectionTitle("Locations")
             Text("Locations organise devices. New devices are added to the checked location.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         items(store.locations, key = { it.id }) { h ->
@@ -306,7 +304,7 @@ fun SettingsScreen(store: LocationStore, dashboards: DashboardStore, manager: Co
         }
         item {
             Spacer(Modifier.height(20.dp))
-            Text("Appearance", style = MaterialTheme.typography.titleLarge)
+            PageSectionTitle("Appearance")
             listOf("system" to "System default", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = store.theme == value, onClick = { store.changeTheme(value) }); Text(label) }
             }

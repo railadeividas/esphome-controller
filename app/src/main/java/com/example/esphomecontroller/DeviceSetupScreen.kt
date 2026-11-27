@@ -161,11 +161,13 @@ fun DeviceSetupScreen(
         }
     }
 
+    ScreenHeader(
+        if (isNew) "Set up device" else "Edit device", subtitle = name.ifBlank { discovered?.displayName },
+        navigation = HeaderNavigation.close("Cancel", onDismiss),
+    ) {
+        TextButton(enabled = !busy, onClick = ::save) { Text(if (isNew) "Add" else "Save") }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onDismiss) { Text("‹ Cancel") }
-        }
-        Text(if (isNew) "Set up device" else "Edit device", style = MaterialTheme.typography.headlineSmall)
 
         discovered?.let { d ->
             Card(Modifier.fillMaxWidth(), shape = AppCardShape, colors = appCardColors(), elevation = appCardElevation()) {
@@ -275,10 +277,7 @@ fun DeviceSetupScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!isWebMode(mode)) OutlinedButton(enabled = !busy && mode.isNotBlank(), onClick = { validate()?.let { status = SetupStatus.Message(it, true) } ?: runProbe(afterSuccess = false, offerSaveAnyway = false) }) { Text("Test connection") }
-            Button(enabled = !busy, onClick = ::save) { Text(if (isNew) "Add device" else "Save") }
-        }
+        if (!isWebMode(mode)) OutlinedButton(enabled = !busy && mode.isNotBlank(), onClick = { validate()?.let { status = SetupStatus.Message(it, true) } ?: runProbe(afterSuccess = false, offerSaveAnyway = false) }) { Text("Test connection") }
         if (onRemove != null) TextButton(onClick = onRemove) { Text("Remove device", color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(20.dp))
     }

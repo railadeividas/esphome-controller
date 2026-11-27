@@ -55,9 +55,11 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
 
     CompositionLocalProvider(LocalEntityStyle provides EntityStyle(settings.brightnessPercent, tapToToggle = false, pendingSpinner = settings.pendingSpinner)) {
         // Top bar: dashboard switcher, edit and settings.
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                TextButton(onClick = { menuOpen = true }) { Text("${board.name} ▾", style = MaterialTheme.typography.titleMedium, maxLines = 1) }
+        ScreenHeader(
+            title = board.name,
+            subtitle = if (settings.summaryLine && !editing) summaryText(board, store, manager) else null,
+            onTitleClick = { menuOpen = true },
+            titleMenu = {
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     dashboards.dashboards.forEach { d ->
                         DropdownMenuItem(
@@ -70,13 +72,13 @@ fun DashboardScreen(store: LocationStore, dashboards: DashboardStore, manager: C
                     DropdownMenuItem(text = { Text("New dashboard") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { menuOpen = false; creating = true })
                     DropdownMenuItem(text = { Text("Manage dashboards") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuOpen = false; onManageDashboards() })
                 }
-            }
+            },
+        ) {
             if (editing) {
                 IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Tune, contentDescription = "Dashboard settings") }
-                Button(onClick = { editing = false }) { Text("Done") }
+                TextButton(onClick = { editing = false }) { Text("Done") }
             } else IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Edit dashboard") }
         }
-        if (settings.summaryLine && !editing) Summary(board, store, manager)
 
         val list: @Composable () -> Unit = {
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
@@ -137,15 +139,14 @@ fun TitleSize.textStyle() = when (this) {
 }
 
 /** Lights on, open doors and offline devices among this dashboard's devices. */
-@Composable
-private fun Summary(board: Dashboard, store: LocationStore, manager: ConnectionManager) {
+private fun summaryText(board: Dashboard, store: LocationStore, manager: ConnectionManager): String {
     val ids = board.deviceIds.filter { id -> store.devices.any { it.id == id } }
     val entities = ids.flatMap { manager.entities(it) }
     val lights = entities.count { it.platform is Platform.Light && isOn(it.state) == true }
     val open = entities.count { it.platform == Platform.BinarySensor && it.deviceClass in setOf("door", "window", "garage_door", "opening") && isOn(it.state) == true }
     val offline = ids.count { manager.sessions[it].isOffline }
     val parts = listOfNotNull("$lights ${if (lights == 1) "light" else "lights"} on", if (open > 0) "$open open" else null, if (offline > 0) "$offline offline" else null)
-    Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
+    return parts.joinToString(" · ")
 }
 
 @Composable
